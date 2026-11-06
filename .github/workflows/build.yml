@@ -1,0 +1,22 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Show toolchain
+        run: swift --version && xcodebuild -version
+      - name: Build app bundle
+        run: ./scripts/bundle.sh release
+      - name: Zip
+        run: cd build && ditto -c -k --keepParent Paneful.app Paneful.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Paneful
+          path: build/Paneful.zip
