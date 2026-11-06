@@ -20,6 +20,8 @@ final class TabGroup {
     let id: UUID
     var members: [Member]
     var activeWindow: AXWindow?
+    /// The whole group was minimized with "Minimize Group": restoring any of its windows restores all.
+    var collapsed = false
     /// Frame (AX coords) shared by every window in the group. The tab bar sits directly above it.
     var contentFrame: CGRect
     var bar: TabBarPanel?
@@ -78,6 +80,8 @@ final class TabGroupManager {
     /// When a window was last put back in place by the self-check, to back off from apps that resist.
     private var healedAt: [AXWindow: TimeInterval] = [:]
     private var tickCount = 0
+    /// Minimizing takes a moment; until then a window can still look un-minimized to the tick fallback.
+    private var minimizeGraceUntil: TimeInterval = 0
 
     // Auto-tabbing of remembered windows.
     /// Per app: windows already judged. They are never auto-tabbed (again).
@@ -231,6 +235,23 @@ final class TabGroupManager {
         save()
     }
 
+    /// Minimizes every window of the group into the Dock. Restoring any one of them brings the whole group back.
+    func minimize(_ group: TabGroup) {
+        let live = group.windows
+        guard !live.isEmpty else { return }
+        group.collapsed = true
+        minimizeGraceUntil = now + 1.5
+        for index in group.members.indices where group.members[index].isLive {
+            group.members[index].minimized = true    // before the AX notifications arrive, so they're ignored
+        }
+        group.bar?.hide()
+        for window in live {
+            FrameKeeper.shared.cancel(window)
+            window.setMinimized(true)
+        }
+        Log.tabs.notice("Minimized group \(group.displayName, privacy: .public)")
+    }
+
     /// Dissolves every formed group and forgets it.
     func ungroupAll() {
         groups.filter(\.isFormed).forEach { ungroup($0) }
@@ -347,8 +368,38 @@ final class TabGroupManager {
 
     private func windowRestored(_ window: AXWindow, in group: TabGroup) {
         guard let index = group.memberIndex(of: window), group.members[index].minimized else { return }
+        if group.collapsed {
+            restoreGroup(group, from: window)
+            return
+        }
         group.members[index].minimized = false
         layoutAfterJoin(group, newcomer: window, focus: true)
+    }
+
+    /// One window of a minimized group came back from the Dock: bring the rest back too, stacked behind it.
+    private func restoreGroup(_ group: TabGroup, from window: AXWindow) {
+        group.collapsed = false
+        var others: [AXWindow] = []
+        for index in group.members.indices where group.members[index].minimized {
+            group.members[index].minimized = false
+            if let other = group.members[index].window, other != window { others.append(other) }
+        }
+        others.forEach { $0.setMinimized(false) }
+        if group.isFormed {
+            group.windows.forEach { FrameKeeper.shared.place($0, group.contentFrame) }
+            activate(group, window: window)
+        } else {
+            layoutAfterJoin(group, newcomer: window, focus: true)
+        }
+        // The other windows finish their un-minimize animation after this one; keep the chosen tab in front.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+            MainActor.assumeIsolated {
+                guard group.isFormed, group.active == window else { return }
+                window.focus()
+                TabGroupManager.shared.placeBars()
+            }
+        }
+        Log.tabs.notice("Restored group \(group.displayName, privacy: .public)")
     }
 
     /// Re-checks a group after a window left it.
@@ -519,6 +570,10 @@ final class TabGroupManager {
                 guard let (g, w) = lookup(index) else { return }
                 TabGroupManager.shared.forget(w, in: g, placeAt: Self.tearOffFrame(for: w, in: g, at: cocoaPoint))
             },
+            minimizeGroup: {
+                guard let g = TabGroupManager.shared.groups.first(where: { $0.id == id }) else { return }
+                TabGroupManager.shared.minimize(g)
+            },
             ungroup: {
                 guard let g = TabGroupManager.shared.groups.first(where: { $0.id == id }) else { return }
                 TabGroupManager.shared.ungroup(g)
@@ -581,7 +636,7 @@ final class TabGroupManager {
                 guard let index = group.memberIndex(of: window) else { continue }
                 if window.frame == nil {
                     windowGone(window, in: group)
-                } else if group.members[index].minimized, !window.isMinimized {
+                } else if group.members[index].minimized, now >= minimizeGraceUntil, !window.isMinimized {
                     windowRestored(window, in: group)
                 }
             }

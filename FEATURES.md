@@ -29,7 +29,10 @@ Features are captured from reference screen recordings. Status: ✅ built · �
 - The tab bar always fits: if a group's window is resized up to the menu bar, the group moves down so the bar
   stays visible and never covers the window.
 - Drag a tab down out of the tab bar to tear it off: it becomes a separate window again, under the cursor.
-- Right-click a tab: Move Out of Group, Close Window, Ungroup All.
+- Right-click a tab: Move Out of Group, Close Window, Minimize Group, Ungroup All.
+- Minimize Group (⌃⌥M, or from the menu-bar menu or a tab's right-click menu) sends every window in the
+  group to the Dock. Restoring any one of them brings the whole group back, stacked, with that window as
+  the active tab. On a window that isn't grouped, ⌃⌥M just minimizes it.
 - Minimizing a tab takes it out of the group and the next tab takes its place. Un-minimizing puts it back as
   the active tab.
 - Quitting Paneful leaves every window visible at the group's full frame.

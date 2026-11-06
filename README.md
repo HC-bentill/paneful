@@ -59,6 +59,7 @@ Run the unit tests with `swift test`.
 | Close a tab's window | Right-click → Close Window (the group still remembers it) |
 | Ungroup | Right-click a tab → Ungroup All, or the menu-bar menu |
 | Minimize a tab | It leaves the group while minimized and comes back as the active tab when restored |
+| Minimize the whole group | ⌃⌥M, menu bar → Minimize Group, or right-click a tab → Minimize Group. Restoring any of its windows from the Dock brings the whole group back |
 
 ### Remembered groups
 - Groups are saved in `~/Library/Application Support/Paneful/groups.json`.

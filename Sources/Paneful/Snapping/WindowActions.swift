@@ -51,6 +51,16 @@ enum WindowActions {
     static func nextTab() { TabGroupManager.shared.cycle(from: currentWindow, by: 1) }
     static func previousTab() { TabGroupManager.shared.cycle(from: currentWindow, by: -1) }
 
+    /// Minimizes the focused window's whole tab group (or just the window when it isn't grouped).
+    static func minimizeGroup() {
+        guard let window = currentWindow else { NSSound.beep(); return }
+        if let group = TabGroupManager.shared.group(containing: window) {
+            TabGroupManager.shared.minimize(group)
+        } else {
+            window.setMinimized(true)
+        }
+    }
+
     static func removeFromGroup() {
         guard let window = currentWindow else { return }
         TabGroupManager.shared.remove(window)

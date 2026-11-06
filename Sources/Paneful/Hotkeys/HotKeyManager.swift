@@ -87,6 +87,7 @@ enum DefaultShortcuts {
             (kVK_ANSI_S,     { WindowActions.sideBySide() }),
             (kVK_ANSI_T,     { WindowActions.tabWithPrevious() }),
             (kVK_ANSI_W,     { WindowActions.removeFromGroup() }),
+            (kVK_ANSI_M,     { WindowActions.minimizeGroup() }),
             (kVK_ANSI_RightBracket, { WindowActions.nextTab() }),
             (kVK_ANSI_LeftBracket,  { WindowActions.previousTab() }),
         ]

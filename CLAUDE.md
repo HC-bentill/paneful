@@ -63,7 +63,9 @@ Privacy & Security → Accessibility after every rebuild.
   visible window is on this Space shows its bar, ordered directly above that window (order(.above, relativeTo:)).
   `TabBarPanel.swift`: SwiftUI tab strip in a non-activating NSPanel (height 32, level .normal, no canJoinAllSpaces).
   Active tab: accent fill + 1.5pt accent outline. Unfocused groups' bars are drawn at 82% opacity.
-- `Hotkeys/HotKeyManager.swift`: Carbon RegisterEventHotKey, all ⌃⌥ (arrows, ↩, C, U/I/J/K, S, T, W, [ ]).
+- `Hotkeys/HotKeyManager.swift`: Carbon RegisterEventHotKey, all ⌃⌥ (arrows, ↩, C, U/I/J/K, S, T, W, M, [ ]).
+  ⌃⌥M = Minimize Group: TabGroupManager.minimize() sets group.collapsed and marks members minimized before
+  the AX calls; restoring any member → restoreGroup() un-minimizes the rest.
 - `Support/Geometry.swift`: AX (top-left origin) ↔ Cocoa (bottom-left origin). `Settings.swift`: UserDefaults
   and SMAppService launch-at-login. `SystemConflicts.swift`: reads com.apple.WindowManager (edge tiling, Stage
   Manager) for the menu warning.

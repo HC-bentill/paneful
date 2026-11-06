@@ -24,6 +24,7 @@ struct TabBarActions {
     var closeWindow: @MainActor (Int) -> Void
     /// Tab dragged out of the bar; the point is where the mouse was released (Cocoa coordinates).
     var tearOff: @MainActor (Int, CGPoint) -> Void
+    var minimizeGroup: @MainActor () -> Void
     var ungroup: @MainActor () -> Void
 }
 
@@ -184,6 +185,7 @@ private struct TabButton: View {
             Button("Move Out of Group") { actions.remove(tab.id) }
             Button("Close Window") { actions.closeWindow(tab.id) }
             Divider()
+            Button("Minimize Group  ⌃⌥M") { actions.minimizeGroup() }
             Button("Ungroup All") { actions.ungroup() }
         }
         .help(tab.title)

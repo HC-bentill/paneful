@@ -99,6 +99,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(item("Next Tab\t⌃⌥]", #selector(nextTab)))
         menu.addItem(item("Previous Tab\t⌃⌥[", #selector(previousTab)))
         menu.addItem(item("Remove Window from Group\t⌃⌥W", #selector(removeFromGroup)))
+        menu.addItem(item("Minimize Group\t⌃⌥M", #selector(minimizeGroup)))
         let ungroup = item("Ungroup All", #selector(ungroupAll))
         ungroup.isEnabled = TabGroupManager.shared.groups.contains { $0.isFormed }
         menu.addItem(ungroup)
@@ -178,6 +179,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func nextTab() { WindowActions.nextTab() }
     @objc private func previousTab() { WindowActions.previousTab() }
     @objc private func removeFromGroup() { WindowActions.removeFromGroup() }
+    @objc private func minimizeGroup() { WindowActions.minimizeGroup() }
     @objc private func ungroupAll() { WindowActions.ungroupAll() }
 
     @objc private func forgetGroup(_ sender: NSMenuItem) {

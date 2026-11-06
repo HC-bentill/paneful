@@ -131,6 +131,12 @@ struct AXWindow: Hashable {
         NSRunningApplication(processIdentifier: pid)?.activate()
     }
 
+    /// Minimizes the window into the Dock, or restores it.
+    func setMinimized(_ minimized: Bool) {
+        AXUIElementSetAttributeValue(element, kAXMinimizedAttribute as CFString,
+                                     minimized ? kCFBooleanTrue : kCFBooleanFalse)
+    }
+
     /// Presses the window's close button, as if the user clicked it.
     func close() {
         guard let raw = Self.value(of: element, kAXCloseButtonAttribute),
