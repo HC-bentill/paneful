@@ -7,7 +7,7 @@
     <key>CFBundleDisplayName</key>
     <string>Paneful Desktop Manager</string>
     <key>CFBundleIdentifier</key>
-    <string>io.github.paneful.Paneful</string>
+    <string>io.github.hc-bentill.paneful</string>
     <key>CFBundleExecutable</key>
     <string>Paneful</string>
     <key>CFBundlePackageType</key>

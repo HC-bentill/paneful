@@ -1,6 +1,8 @@
 # Paneful Desktop Manager: notes for Claude
 
 Open-source macOS menu-bar window manager (MIT), owned by Henry Bentil. Swift Package, macOS 27.2+.
+Repo: https://github.com/HC-bentill/paneful (public). Bundle ID: io.github.hc-bentill.paneful.
+CI: .github/workflows/build.yml runs `swift test` and builds the app bundle on every push and PR.
 agentmemory project id: `macos-window-tabs-tiler`. Recall it for the full history (video analyses, decisions).
 
 ## Status (2026-11-06)

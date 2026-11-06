@@ -20,7 +20,7 @@ See [FEATURES.md](FEATURES.md) for the full and upcoming feature list (auto-tili
 ## Build & run
 
 ```bash
-git clone https://github.com/<your-username>/paneful.git
+git clone https://github.com/HC-bentill/paneful.git
 cd paneful
 ./scripts/bundle.sh          # builds build/Paneful.app
 open build/Paneful.app
