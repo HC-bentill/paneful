@@ -41,6 +41,7 @@ final class TabGroupManager {
     private var observers: [pid_t: AXObserver] = [:]
     private var pendingSync: [UUID: DispatchWorkItem] = [:]
     private var iconCache: [pid_t: NSImage] = [:]
+    private var focusFollowPausedUntil: TimeInterval = 0
 
     private static let watched = [
         kAXMovedNotification, kAXResizedNotification,
@@ -59,6 +60,11 @@ final class TabGroupManager {
 
     func group(containing window: AXWindow) -> TabGroup? {
         groups.first { $0.windows.contains(window) }
+    }
+
+    /// The group whose (visible) tab bar is under an AX-space point.
+    func group(withVisibleBarAtAX point: CGPoint) -> TabGroup? {
+        groups.first { $0.bar.isVisible && $0.barFrame.contains(point) }
     }
 
     // MARK: - Grouping
@@ -115,6 +121,9 @@ final class TabGroupManager {
     func activate(_ group: TabGroup, index: Int) {
         guard group.windows.indices.contains(index) else { return }
         group.activeIndex = index
+        // App activation is asynchronous; don't let the next tick see the old app still frontmost
+        // and switch the active tab back.
+        focusFollowPausedUntil = ProcessInfo.processInfo.systemUptime + 0.6
         let window = group.windows[index]
         window.setFrame(group.contentFrame)
         window.focus()
@@ -152,6 +161,8 @@ final class TabGroupManager {
     // MARK: - Removing
 
     private func detach(_ window: AXWindow, from group: TabGroup, restore: Bool) {
+        // A group can be dissolved mid-loop (e.g. two of its windows close at once).
+        guard groups.contains(where: { $0 === group }) else { return }
         unobserve(window)
         group.windows.removeAll { $0 == window }
         if restore {
@@ -211,9 +222,10 @@ final class TabGroupManager {
         }
 
         let focused = WindowQuery.focusedWindow()
+        let followFocus = ProcessInfo.processInfo.systemUptime >= focusFollowPausedUntil
         for group in groups {
             if let focused, let index = group.windows.firstIndex(of: focused) {
-                if index != group.activeIndex {
+                if index != group.activeIndex, followFocus {
                     group.activeIndex = index
                     focused.setFrame(group.contentFrame)
                 }

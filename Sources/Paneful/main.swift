@@ -6,5 +6,9 @@ MainActor.assumeIsolated {
     let delegate = AppDelegate()
     app.delegate = delegate
     app.setActivationPolicy(.accessory)
-    app.run()
+    // NSApplication.delegate is weak, and Swift may release a local after its last use in
+    // optimized builds, so keep the delegate alive for the whole run loop explicitly.
+    withExtendedLifetime(delegate) {
+        app.run()
+    }
 }

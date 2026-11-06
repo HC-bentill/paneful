@@ -49,6 +49,8 @@ final class TabBarPanel {
         }
     }
 
+    var isVisible: Bool { panel.isVisible }
+
     func show() {
         if !panel.isVisible { panel.orderFrontRegardless() }
     }

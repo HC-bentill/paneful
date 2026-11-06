@@ -153,12 +153,21 @@ final class DragController {
 
     private func tabTarget(cursor: CGPoint, dragged: AXWindow) -> DropTarget? {
         let axPoint = Geometry.axPoint(fromCocoa: cursor)
+
+        // The tab bar is Paneful's own panel, so CGWindowList (which skips our windows) can't find
+        // a group when the cursor is over its bar. Check visible bars first.
+        let ownGroup = TabGroupManager.shared.group(containing: dragged)
+        if let group = TabGroupManager.shared.group(withVisibleBarAtAX: axPoint),
+           group !== ownGroup, let active = group.active {
+            return .tab(active, Geometry.toCocoa(group.outerFrame))
+        }
+
         guard let other = WindowQuery.window(belowAX: axPoint, excluding: dragged),
               other != dragged,
               let otherFrame = other.frame else { return nil }
 
         // Hidden tabs of the dragged window's own group sit underneath it; ignore them.
-        if let ownGroup = TabGroupManager.shared.group(containing: dragged), ownGroup.windows.contains(other) {
+        if let ownGroup, ownGroup.windows.contains(other) {
             return nil
         }
 
