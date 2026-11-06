@@ -19,6 +19,11 @@ let package = Package(
                 .linkedFramework("Carbon"),
                 .linkedFramework("ServiceManagement")
             ]
+        ),
+        .testTarget(
+            name: "PanefulTests",
+            dependencies: ["Paneful"],
+            path: "Tests/PanefulTests"
         )
     ]
 )

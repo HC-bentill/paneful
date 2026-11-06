@@ -8,6 +8,8 @@ Paneful is a free, open-source menu-bar app for macOS. It brings two things macO
   or full screen, with a live blurred preview of where it will land.
 - **Cross-app tab groups.** Stack windows from *different* apps (say, a browser and Microsoft Teams) into
   one frame with a floating tab bar on top. Click a tab to switch, and move or resize the group as one window.
+- **Remembered groups.** Paneful remembers your tab groups across app restarts, reboots and its own
+  relaunches. Quit Teams, reopen it, and its window tabs itself back into the group. New windows float.
 
 See [FEATURES.md](FEATURES.md) for the full and upcoming feature list (auto-tiling is next).
 
@@ -28,8 +30,11 @@ On first launch macOS asks for **Accessibility** access
 (System Settings → Privacy & Security → Accessibility). Paneful needs it to move, resize and raise other
 apps' windows. After you allow it, Paneful starts working without a relaunch.
 
-> If you rebuild and Paneful stops working, remove it from the Accessibility list and add it again.
-> macOS ties the permission to the app's signature.
+> `bundle.sh` signs with your "Apple Development" certificate if you have one (or `$PANEFUL_SIGN_IDENTITY`),
+> so the permission survives rebuilds. Without one it signs ad-hoc. In that case, if Paneful stops working
+> after a rebuild, remove it from the Accessibility list and add it again.
+
+Run the unit tests with `swift test`.
 
 ## How to use
 
@@ -46,13 +51,25 @@ apps' windows. After you allow it, Paneful starts working without a relaunch.
 ### Tab groups
 | Action | How |
 |---|---|
-| Make a group / add a tab | Drag a window onto another window's title bar (or an existing tab bar), or ⌃⌥T to tab the focused window with the previous one |
+| Make a group / add a tab | Drag a window onto another window's title bar (or an existing tab bar), hold it there for a moment until the preview appears, then let go. Or press ⌃⌥T to tab the focused window with the previous one |
 | Switch tab | Click it, or ⌃⌥] / ⌃⌥[ |
-| Remove a tab | Hover and click ✕, right-click → Remove from Group, or ⌃⌥W |
-| Ungroup everything | Right-click a tab → Ungroup All, or the menu-bar menu |
+| Remove a tab | Hover and click ✕, drag the tab down out of the bar, right-click → Move Out of Group, or ⌃⌥W |
+| Close a tab's window | Right-click → Close Window (the group still remembers it) |
+| Ungroup | Right-click a tab → Ungroup All, or the menu-bar menu |
+| Minimize a tab | It leaves the group while minimized and comes back as the active tab when restored |
+
+### Remembered groups
+- Groups are saved in `~/Library/Application Support/Paneful/groups.json`.
+- When a window from a remembered group opens again, it joins its group as a tab within a few seconds of
+  appearing. Windows are matched by app, plus the window title when the app has several windows.
+- Windows that Paneful has never seen in a group float. They only join a group when you drag them in or press ⌃⌥T.
+- Removing a tab or ungrouping forgets it. Closing a window, quitting the app or quitting Paneful does not.
+- Menu bar → **Remembered Groups** lists saved groups, so you can forget one or all of them. Switch auto-tabbing
+  off with **Auto-tab Remembered Windows**.
 
 Everything is also in the menu-bar icon, where you can switch off drag-to-snap and drag-to-tab, and turn on
-Launch at Login.
+Launch at Login. If macOS's own edge tiling or Stage Manager is on, the menu warns you, because both fight
+Paneful, and links to the setting that turns them off.
 
 ## How it works
 - **Accessibility API (`AXUIElement`)** moves, resizes and raises other apps' windows.
@@ -60,6 +77,8 @@ Launch at Login.
 - **Tab groups** keep every window in the group at the same frame and raise the selected one. An `AXObserver`
   watches the visible window, so when you move or resize it, the hidden tabs follow and the SwiftUI tab bar
   repositions.
+- **Remembered groups** are stored as JSON. Paneful watches the apps that have closed group members, and when
+  one opens a new window that matches, it tabs that window back in.
 - **Carbon `RegisterEventHotKey`** handles the global shortcuts.
 
 ```
@@ -67,9 +86,10 @@ Sources/Paneful/
 ├── App/            AppDelegate, menu-bar menu
 ├── Accessibility/  AXWindow wrapper, window queries, permissions
 ├── Snapping/       snap zones, drag controller, preview panel, window actions
-├── Tabs/           tab-group manager and floating tab bar
+├── Tabs/           tab-group manager, floating tab bar, remembered-group store
 ├── Hotkeys/        global shortcuts
-└── Support/        coordinate conversion, settings
+└── Support/        coordinate conversion, settings, macOS conflict checks
+Tests/PanefulTests/ unit tests (swift test)
 ```
 
 ## Known limitations

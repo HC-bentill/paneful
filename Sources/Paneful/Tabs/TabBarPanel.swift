@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 struct TabItem: Identifiable, Equatable {
-    let id: Int          // index in the group
+    let id: Int          // index among the group's live windows
     let title: String
     let icon: NSImage?
     let isActive: Bool
@@ -13,6 +13,18 @@ final class TabBarModel: ObservableObject {
     @Published var tabs: [TabItem] = []
 }
 
+/// What the tab bar can ask the tab-group manager to do. Indices refer to `TabItem.id`.
+struct TabBarActions {
+    var select: @MainActor (Int) -> Void
+    /// Take the window out of the group (and forget it there).
+    var remove: @MainActor (Int) -> Void
+    /// Close the window itself. The group still remembers it.
+    var closeWindow: @MainActor (Int) -> Void
+    /// Tab dragged out of the bar; the point is where the mouse was released (Cocoa coordinates).
+    var tearOff: @MainActor (Int, CGPoint) -> Void
+    var ungroup: @MainActor () -> Void
+}
+
 /// The floating tab strip drawn just above a tab group's windows.
 @MainActor
 final class TabBarPanel {
@@ -21,9 +33,7 @@ final class TabBarPanel {
     let model = TabBarModel()
     private let panel: NSPanel
 
-    init(onSelect: @escaping @MainActor (Int) -> Void,
-         onClose: @escaping @MainActor (Int) -> Void,
-         onUngroup: @escaping @MainActor () -> Void) {
+    init(actions: TabBarActions) {
         panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 400, height: Self.height),
                         styleMask: [.borderless, .nonactivatingPanel],
                         backing: .buffered,
@@ -37,7 +47,7 @@ final class TabBarPanel {
         panel.level = .floating
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
 
-        let root = TabBarView(model: model, onSelect: onSelect, onClose: onClose, onUngroup: onUngroup)
+        let root = TabBarView(model: model, actions: actions)
         panel.contentView = FirstMouseHostingView(rootView: root)
     }
 
@@ -74,17 +84,12 @@ final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
 
 struct TabBarView: View {
     @ObservedObject var model: TabBarModel
-    let onSelect: @MainActor (Int) -> Void
-    let onClose: @MainActor (Int) -> Void
-    let onUngroup: @MainActor () -> Void
+    let actions: TabBarActions
 
     var body: some View {
         HStack(spacing: 4) {
             ForEach(model.tabs) { tab in
-                TabButton(tab: tab,
-                          onSelect: { onSelect(tab.id) },
-                          onClose: { onClose(tab.id) },
-                          onUngroup: onUngroup)
+                TabButton(tab: tab, actions: actions)
             }
         }
         .padding(.horizontal, 4)
@@ -95,11 +100,15 @@ struct TabBarView: View {
 }
 
 private struct TabButton: View {
+    /// How far (pt) a tab must be pulled up or down out of the strip to tear it off.
+    static let tearOffDistance: CGFloat = 24
+
     let tab: TabItem
-    let onSelect: @MainActor () -> Void
-    let onClose: @MainActor () -> Void
-    let onUngroup: @MainActor () -> Void
+    let actions: TabBarActions
     @State private var hovering = false
+    @GestureState private var dragOffset: CGSize = .zero
+
+    private var tearingOff: Bool { abs(dragOffset.height) > Self.tearOffDistance }
 
     var body: some View {
         HStack(spacing: 6) {
@@ -113,14 +122,14 @@ private struct TabButton: View {
                 .lineLimit(1)
                 .truncationMode(.tail)
             Spacer(minLength: 0)
-            if hovering {
-                Button(action: onClose) {
+            if hovering && dragOffset == .zero {
+                Button { actions.remove(tab.id) } label: {
                     Image(systemName: "xmark")
                         .font(.system(size: 9, weight: .bold))
                         .frame(width: 16, height: 16)
                 }
                 .buttonStyle(.plain)
-                .help("Remove from group")
+                .help("Move out of group")
             }
         }
         .padding(.horizontal, 10)
@@ -131,11 +140,23 @@ private struct TabButton: View {
                                    : (hovering ? Color.primary.opacity(0.06) : Color.clear))
         )
         .contentShape(Rectangle())
-        .onTapGesture { onSelect() }
+        .offset(x: dragOffset.width)
+        .opacity(tearingOff ? 0.45 : 1)
+        .onTapGesture { actions.select(tab.id) }
+        .gesture(
+            DragGesture(minimumDistance: 6)
+                .updating($dragOffset) { value, state, _ in state = value.translation }
+                .onEnded { value in
+                    guard abs(value.translation.height) > Self.tearOffDistance else { return }
+                    actions.tearOff(tab.id, NSEvent.mouseLocation)
+                }
+        )
         .onHover { hovering = $0 }
         .contextMenu {
-            Button("Remove from Group") { onClose() }
-            Button("Ungroup All") { onUngroup() }
+            Button("Move Out of Group") { actions.remove(tab.id) }
+            Button("Close Window") { actions.closeWindow(tab.id) }
+            Divider()
+            Button("Ungroup All") { actions.ungroup() }
         }
         .help(tab.title)
     }

@@ -16,6 +16,9 @@ final class DragController {
     private let cornerSize: CGFloat = 140
     /// Height (pt) of the strip at the top of a window where dropping creates a tab group.
     private let tabStripHeight: CGFloat = 44
+    /// How long (s) the cursor must stay over a tab drop zone before it becomes the target. Stops windows
+    /// from being grouped by accident when they're dragged across other windows.
+    private let tabDwell: TimeInterval = 0.3
 
     private var monitors: [Any] = []
     private let preview = PreviewWindow()
@@ -27,7 +30,10 @@ final class DragController {
     private var gaveUp = false
     private var target: DropTarget?
     private var lastTabProbe: TimeInterval = 0
-    private var lastTabResult: DropTarget?
+    /// The tab drop zone under the cursor (not yet confirmed by the dwell) and when it was entered.
+    private var tabCandidate: (window: AXWindow, rect: CGRect)?
+    private var tabCandidateSince: TimeInterval = 0
+    private var dwellCheck: DispatchWorkItem?
 
     func start() {
         guard monitors.isEmpty else { return }
@@ -55,7 +61,8 @@ final class DragController {
         reset()
         guard Settings.dragToSnap || Settings.dragToTab else { return }
         let point = Geometry.axPoint(fromCocoa: NSEvent.mouseLocation)
-        guard let window = WindowQuery.window(atAX: point), let frame = window.frame else { return }
+        guard let window = WindowQuery.window(atAX: point), !window.isFullScreen,
+              let frame = window.frame else { return }
         dragged = window
         startFrame = frame
         startMouse = NSEvent.mouseLocation
@@ -78,7 +85,11 @@ final class DragController {
             return
         }
 
-        target = computeTarget(cursor: mouse, dragged: window)
+        updateTarget(cursor: mouse, dragged: window)
+    }
+
+    private func updateTarget(cursor: CGPoint, dragged: AXWindow) {
+        target = computeTarget(cursor: cursor, dragged: dragged)
         switch target {
         case .snap(let rect)?: preview.show(rect)
         case .tab(_, let rect)?: preview.show(rect)
@@ -110,8 +121,10 @@ final class DragController {
         isMoving = false
         gaveUp = false
         target = nil
-        lastTabResult = nil
         lastTabProbe = 0
+        tabCandidate = nil
+        dwellCheck?.cancel()
+        dwellCheck = nil
     }
 
     // MARK: - Target detection
@@ -119,17 +132,37 @@ final class DragController {
     private func computeTarget(cursor: CGPoint, dragged: AXWindow) -> DropTarget? {
         if Settings.dragToSnap, let zone = edgeZone(for: cursor),
            let screen = Geometry.screen(containingCocoa: cursor) {
+            tabCandidate = nil   // coming back to a window restarts its dwell
             return .snap(zone.rect(in: screen.visibleFrame))
         }
-        if Settings.dragToTab {
-            // CGWindowList is relatively expensive; probe at most ~16 times a second.
-            let now = ProcessInfo.processInfo.systemUptime
-            if now - lastTabProbe < 0.06 { return lastTabResult }
+        guard Settings.dragToTab else { return nil }
+
+        // CGWindowList is relatively expensive; probe at most ~16 times a second.
+        let now = ProcessInfo.processInfo.systemUptime
+        if now - lastTabProbe >= 0.06 {
             lastTabProbe = now
-            lastTabResult = tabTarget(cursor: cursor, dragged: dragged)
-            return lastTabResult
+            let probe = tabTarget(cursor: cursor, dragged: dragged)
+            if probe?.window != tabCandidate?.window {
+                tabCandidateSince = now
+                scheduleDwellCheck(dragged: dragged)
+            }
+            tabCandidate = probe
         }
-        return nil
+        guard let tabCandidate, now - tabCandidateSince >= tabDwell else { return nil }
+        return .tab(tabCandidate.window, tabCandidate.rect)
+    }
+
+    /// Mouse-dragged events stop while the cursor is held still, so re-check once the dwell has passed.
+    private func scheduleDwellCheck(dragged: AXWindow) {
+        dwellCheck?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.isMoving, self.dragged == dragged, self.tabCandidate != nil else { return }
+                self.updateTarget(cursor: NSEvent.mouseLocation, dragged: dragged)
+            }
+        }
+        dwellCheck = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + tabDwell + 0.02, execute: work)
     }
 
     private func edgeZone(for cursor: CGPoint) -> SnapZone? {
@@ -151,7 +184,7 @@ final class DragController {
         return nil
     }
 
-    private func tabTarget(cursor: CGPoint, dragged: AXWindow) -> DropTarget? {
+    private func tabTarget(cursor: CGPoint, dragged: AXWindow) -> (window: AXWindow, rect: CGRect)? {
         let axPoint = Geometry.axPoint(fromCocoa: cursor)
 
         // The tab bar is Paneful's own panel, so CGWindowList (which skips our windows) can't find
@@ -159,7 +192,7 @@ final class DragController {
         let ownGroup = TabGroupManager.shared.group(containing: dragged)
         if let group = TabGroupManager.shared.group(withVisibleBarAtAX: axPoint),
            group !== ownGroup, let active = group.active {
-            return .tab(active, Geometry.toCocoa(group.outerFrame))
+            return (active, Geometry.toCocoa(group.outerFrame))
         }
 
         guard let other = WindowQuery.window(belowAX: axPoint, excluding: dragged),
@@ -178,6 +211,6 @@ final class DragController {
         guard axPoint.y >= stripTop, axPoint.y <= stripTop + tabStripHeight + (groupFrame == nil ? 0 : TabBarPanel.height) else {
             return nil
         }
-        return .tab(other, Geometry.toCocoa(outer))
+        return (other, Geometry.toCocoa(outer))
     }
 }

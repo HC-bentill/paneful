@@ -47,6 +47,11 @@ struct AXWindow: Hashable {
         role == kAXWindowRole && (subrole == nil || subrole == kAXStandardWindowSubrole)
     }
 
+    /// Native full-screen (green button) windows live in their own Space; Paneful leaves them alone.
+    var isFullScreen: Bool { (Self.value(of: element, "AXFullScreen") as? Bool) ?? false }
+
+    var bundleID: String? { NSRunningApplication(processIdentifier: pid)?.bundleIdentifier }
+
     var position: CGPoint? {
         guard let raw = Self.value(of: element, kAXPositionAttribute),
               CFGetTypeID(raw) == AXValueGetTypeID() else { return nil }
@@ -98,6 +103,13 @@ struct AXWindow: Hashable {
         NSRunningApplication(processIdentifier: pid)?.activate()
     }
 
+    /// Presses the window's close button, as if the user clicked it.
+    func close() {
+        guard let raw = Self.value(of: element, kAXCloseButtonAttribute),
+              CFGetTypeID(raw) == AXUIElementGetTypeID() else { return }
+        AXUIElementPerformAction(raw as! AXUIElement, kAXPressAction as CFString)
+    }
+
     // MARK: - Lookup helpers
 
     static func focused(inApp pid: pid_t) -> AXWindow? {
@@ -109,9 +121,23 @@ struct AXWindow: Hashable {
     }
 
     static func windows(ofApp pid: pid_t) -> [AXWindow] {
+        windowsIfResponsive(ofApp: pid) ?? []
+    }
+
+    /// The app's windows, or `nil` when the app didn't answer (hung, or not an AX-capable app).
+    static func windowsIfResponsive(ofApp pid: pid_t) -> [AXWindow]? {
         let app = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(app, 0.5)
-        guard let list = value(of: app, kAXWindowsAttribute) as? [AXUIElement] else { return [] }
-        return list.map { AXWindow(element: $0, pid: pid) }
+        var value: CFTypeRef?
+        let error = AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &value)
+        switch error {
+        case .success:
+            guard let list = value as? [AXUIElement] else { return [] }
+            return list.map { AXWindow(element: $0, pid: pid) }
+        case .noValue, .attributeUnsupported:
+            return []
+        default:
+            return nil
+        }
     }
 }

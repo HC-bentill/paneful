@@ -16,6 +16,12 @@ enum Settings {
         set { defaults.set(newValue, forKey: "dragToTab") }
     }
 
+    /// Windows that belonged to a remembered tab group rejoin it as a tab when they open again.
+    static var autoTabRemembered: Bool {
+        get { defaults.object(forKey: "autoTabRemembered") as? Bool ?? true }
+        set { defaults.set(newValue, forKey: "autoTabRemembered") }
+    }
+
     /// Works only when running from the bundled Paneful.app.
     static var launchAtLogin: Bool {
         get { SMAppService.mainApp.status == .enabled }
