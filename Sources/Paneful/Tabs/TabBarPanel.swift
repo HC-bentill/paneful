@@ -100,8 +100,17 @@ struct TabBarView: View {
     let actions: TabBarActions
 
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 0) {
             ForEach(model.tabs) { tab in
+                if tab.id > 0 {
+                    // Separator between neighbouring tabs; hidden next to the active tab, whose outline
+                    // already marks its edges.
+                    let besideActive = tab.isActive || model.tabs[tab.id - 1].isActive
+                    Rectangle()
+                        .fill(Color.primary.opacity(besideActive ? 0 : 0.2))
+                        .frame(width: 1, height: 16)
+                        .padding(.horizontal, 2)
+                }
                 TabButton(tab: tab, actions: actions)
             }
         }
