@@ -32,6 +32,18 @@ bundle.sh signs with the first "Apple Development" identity (or `$PANEFUL_SIGN_I
 survives rebuilds. With no identity it signs ad-hoc, and then you must remove and re-add Paneful in System Settings →
 Privacy & Security → Accessibility after every rebuild.
 
+## Releasing (DMG for the landing page)
+- `./scripts/make-dmg.sh [version]` → build/Paneful-<v>.dmg + build/Paneful.dmg. It builds into build/release, so it
+  never replaces the dev build. It uses a Developer ID identity if the keychain has one, else ad-hoc, and NEVER
+  the Apple Development cert (Gatekeeper rejects it on other Macs, and it embeds Henry's iCloud email). It notarizes
+  when NOTARY_PROFILE is set.
+- Publish: `git tag vX.Y.Z && git push origin vX.Y.Z` → .github/workflows/release.yml runs tests, builds the DMG and
+  creates the GitHub Release with both DMG names. Signing and notarization switch on automatically once the repo
+  secrets DEVELOPER_ID_P12, DEVELOPER_ID_P12_PASSWORD, APPLE_ID, APPLE_TEAM_ID and APPLE_APP_PASSWORD exist.
+- The landing page (../paneful-landing, React + Vite, not a git repo yet) links to
+  https://github.com/HC-bentill/paneful/releases/latest/download/Paneful.dmg (constants in src/components/shared.jsx).
+- macOS 27 is Apple-silicon only, so arm64-only builds are fine.
+
 ## Architecture (Sources/Paneful)
 - `App/AppDelegate.swift`: status-bar menu (rebuilt in menuNeedsUpdate), permission polling, 0.35s tick
   timer → FocusTracker.update() + TabGroupManager.refresh().

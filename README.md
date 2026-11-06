@@ -15,6 +15,12 @@ Paneful is a free, open-source menu-bar app for macOS. It brings two things macO
 
 See [FEATURES.md](FEATURES.md) for the full and upcoming feature list (auto-tiling is next).
 
+## Download
+Get **[Paneful.dmg](https://github.com/HC-bentill/paneful/releases/latest/download/Paneful.dmg)** (latest release),
+open it and drag Paneful to Applications. If macOS says it can't verify the developer, open
+System Settings → Privacy & Security and click **Open Anyway**. Then allow Paneful under Accessibility.
+All versions are on the [Releases](https://github.com/HC-bentill/paneful/releases) page.
+
 ## Requirements
 - macOS 27.2 or later
 - Swift toolchain 5.10+ (Xcode or Command Line Tools) to build from source

@@ -1,0 +1,87 @@
+name: Release
+
+# Push a version tag to publish a release:
+#   git tag v0.1.0 && git push origin v0.1.0
+# The release gets Paneful-<version>.dmg and Paneful.dmg. The landing page links to
+#   https://github.com/HC-bentill/paneful/releases/latest/download/Paneful.dmg
+# which always serves the newest release's Paneful.dmg.
+#
+# Signing and notarization run only when these repository secrets exist (Apple Developer Program):
+#   DEVELOPER_ID_P12           base64 of the exported "Developer ID Application" certificate (.p12)
+#   DEVELOPER_ID_P12_PASSWORD  password of that .p12
+#   APPLE_ID                   Apple ID email used for notarization
+#   APPLE_TEAM_ID              10-character team ID
+#   APPLE_APP_PASSWORD         app-specific password for that Apple ID (appleid.apple.com)
+# Without them the DMG is ad-hoc signed and users confirm the first launch in System Settings.
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-latest
+    env:
+      HAS_DEVELOPER_ID: ${{ secrets.DEVELOPER_ID_P12 != '' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # build number = commit count
+
+      - name: Unit tests
+        run: swift test
+
+      - name: Import Developer ID certificate and notary credentials
+        if: env.HAS_DEVELOPER_ID == 'true'
+        env:
+          P12: ${{ secrets.DEVELOPER_ID_P12 }}
+          P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          echo "$P12" | base64 --decode > "$RUNNER_TEMP/developer-id.p12"
+          security import "$RUNNER_TEMP/developer-id.p12" -k "$KEYCHAIN" -P "$P12_PASSWORD" -T /usr/bin/codesign
+          rm "$RUNNER_TEMP/developer-id.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          xcrun notarytool store-credentials paneful-notary \
+            --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" \
+            --keychain "$KEYCHAIN"
+          echo "NOTARY_PROFILE=paneful-notary" >> "$GITHUB_ENV"
+          echo "NOTARY_KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
+
+      - name: Build DMG
+        run: ./scripts/make-dmg.sh "${GITHUB_REF_NAME#v}"
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          {
+            echo "## Install"
+            echo "1. Download **Paneful.dmg**, open it and drag **Paneful** onto **Applications**."
+            if [ "$HAS_DEVELOPER_ID" != "true" ]; then
+              echo "2. Open Paneful. macOS says it can't verify the developer: open **System Settings → Privacy & Security**, scroll down and click **Open Anyway** (this build isn't notarized yet)."
+              echo "3. Allow Paneful under **Privacy & Security → Accessibility** when asked."
+            else
+              echo "2. Open Paneful and allow it under **System Settings → Privacy & Security → Accessibility** when asked."
+            fi
+            echo ""
+            echo "Requires macOS 27.2 or later (Apple silicon)."
+            echo ""
+          } > "$RUNNER_TEMP/notes.md"
+          gh release create "$GITHUB_REF_NAME" \
+            "build/Paneful-$VERSION.dmg" "build/Paneful.dmg" \
+            --title "Paneful $VERSION" \
+            --notes-file "$RUNNER_TEMP/notes.md" \
+            --generate-notes
