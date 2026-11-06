@@ -1,3 +1,5 @@
+<p align="center"><img src="Resources/Logo/AppIcon-1024.png" width="160" alt="Paneful icon"></p>
+
 # Paneful Desktop Manager
 
 **Snap windows side by side and group windows from any app into tabs, on macOS.**

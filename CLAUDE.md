@@ -51,6 +51,22 @@ Privacy & Security → Accessibility after every rebuild.
 - Concurrency: everything is @MainActor; C callbacks (Carbon, AXObserver) are global funcs using
   MainActor.assumeIsolated.
 
+## Brand ("Snap Grid" logo)
+- Mark: 2x2 grid. A tall white pane is snapped into the left half, two translucent white panes (35%) sit on the
+  right, and a small ↗ arrow is in the bottom-right pane. Background is a vertical gradient from #FF8A4C (orange,
+  top) to #FF4D6D (pink, bottom).
+- Source files are in Resources/Logo: AppIcon.svg (1024 master on the macOS 824px grid), AppIcon-1024.png,
+  MenuBarIcon.svg, and SocialPreview.png (GitHub card, 1280x640; regenerate it with
+  `swift scripts/render-social-preview.swift`).
+- Shipped assets: Resources/AppIcon.icns (Info.plist CFBundleIconFile=AppIcon), plus Resources/MenuBarIcon.png and
+  @2x (black template glyph). bundle.sh copies all of them into the app.
+- Code: Support/Brand.swift menuBarIcon() loads the bundled glyph. Under `swift run` (no bundle), it draws the same
+  shapes in code. Don't reintroduce SF Symbol stand-ins.
+- If Finder or System Settings still shows the generic grey app icon after a rebuild, run
+  `touch build/Paneful.app`, then `lsregister -f build/Paneful.app`, then quit and reopen System Settings.
+- The GitHub social preview can't be set through the API. Upload SocialPreview.png by hand in repo Settings →
+  General → Social preview.
+
 ## Features (see FEATURES.md for full spec)
 1. Side-by-side snapping: built
 2. Cross-app tab groups: built

@@ -23,6 +23,9 @@ cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
 if [ -f "$ROOT/Resources/AppIcon.icns" ]; then
   cp "$ROOT/Resources/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 fi
+for f in MenuBarIcon.png MenuBarIcon@2x.png; do
+  if [ -f "$ROOT/Resources/$f" ]; then cp "$ROOT/Resources/$f" "$APP/Contents/Resources/$f"; fi
+done
 
 IDENTITY="${PANEFUL_SIGN_IDENTITY:-}"
 if [ -z "$IDENTITY" ]; then

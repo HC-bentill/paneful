@@ -50,8 +50,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func setupStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {
-            button.image = NSImage(systemSymbolName: "rectangle.split.2x1", accessibilityDescription: "Paneful")
-            button.image?.isTemplate = true
+            button.image = Brand.menuBarIcon()
         }
         let menu = NSMenu()
         menu.delegate = self
