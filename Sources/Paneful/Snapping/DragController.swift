@@ -2,38 +2,58 @@ import AppKit
 
 /// Watches global mouse drags. When the user drags a window:
 ///  - to a screen edge/corner → shows a snap preview and snaps on release;
-///  - onto another window's title-bar strip → shows a "tab" preview and groups them on release.
+///  - onto the top part of another window (or a tab bar) and holds briefly → shows a "tab" preview and
+///    groups them on release.
+///
+/// Drag tracking uses the window server (CGWindowList), not Accessibility, so it stays quick and reliable
+/// with apps that answer Accessibility requests slowly (Chromium, Electron). Accessibility is only used
+/// once a real window move has started.
 @MainActor
 final class DragController {
     private enum DropTarget {
-        case snap(CGRect)                 // Cocoa rect
-        case tab(AXWindow, CGRect)        // target window, Cocoa preview rect
+        case snap(CGRect)                                // Cocoa rect
+        case tab(TabCandidate, ready: Bool)
     }
 
-    /// How close (pt) the cursor must get to a screen edge to trigger a snap.
+    private struct TabCandidate {
+        enum Key: Equatable { case window(CGWindowID), group(UUID) }
+        let key: Key
+        let window: ScreenWindow?    // the window under the cursor (nil when dropping on a tab bar)
+        let group: TabGroup?         // its formed group, if any
+        let rect: CGRect             // preview, Cocoa coordinates
+    }
+
+    /// How close (pt) the cursor must get to a screen edge to trigger a snap. When the Dock sits on that
+    /// side, anywhere over the Dock counts too.
     private let edgeThreshold: CGFloat = 6
     /// Corner hot-zone size (pt) along the left/right edges → quarter snaps.
     private let cornerSize: CGFloat = 140
-    /// Height (pt) of the strip at the top of a window where dropping creates a tab group.
-    private let tabStripHeight: CGFloat = 44
-    /// How long (s) the cursor must stay over a tab drop zone before it becomes the target. Stops windows
-    /// from being grouped by accident when they're dragged across other windows.
+    /// Height (pt) of the drop zone at the top of a window (title bar + toolbar) that creates a tab.
+    private let tabZoneHeight: CGFloat = 80
+    /// How long (s) the cursor must stay over a tab drop zone before releasing groups the windows.
     private let tabDwell: TimeInterval = 0.3
+    /// A single missed probe (window list caught mid-update) shouldn't restart the hold.
+    private let probeGrace: TimeInterval = 0.15
 
     private var monitors: [Any] = []
     private let preview = PreviewWindow()
 
-    private var dragged: AXWindow?
-    private var startFrame: CGRect?
-    private var startMouse: CGPoint = .zero
+    // The current drag.
+    private var pressed: ScreenWindow?       // window under the cursor at mouse-down
+    private var startMouse: CGPoint = .zero  // Cocoa
     private var isMoving = false
     private var gaveUp = false
+    private var dragged: AXWindow?
+    private var draggedGroup: TabGroup?
+    private var lookThrough: Set<CGWindowID> = []   // the dragged window and its group's hidden tabs
     private var target: DropTarget?
-    private var lastTabProbe: TimeInterval = 0
-    /// The tab drop zone under the cursor (not yet confirmed by the dwell) and when it was entered.
-    private var tabCandidate: (window: AXWindow, rect: CGRect)?
-    private var tabCandidateSince: TimeInterval = 0
+    private var lastProbe: TimeInterval = 0
+    private var lastProbeHit: TimeInterval = 0
+    private var candidate: TabCandidate?
+    private var candidateSince: TimeInterval = 0
     private var dwellCheck: DispatchWorkItem?
+
+    private var now: TimeInterval { ProcessInfo.processInfo.systemUptime }
 
     func start() {
         guard monitors.isEmpty else { return }
@@ -60,39 +80,58 @@ final class DragController {
     private func mouseDown() {
         reset()
         guard Settings.dragToSnap || Settings.dragToTab else { return }
-        let point = Geometry.axPoint(fromCocoa: NSEvent.mouseLocation)
-        guard let window = WindowQuery.window(atAX: point), !window.isFullScreen,
-              let frame = window.frame else { return }
-        dragged = window
-        startFrame = frame
-        startMouse = NSEvent.mouseLocation
+        let mouse = NSEvent.mouseLocation
+        guard let window = WindowQuery.topWindow(atAX: Geometry.axPoint(fromCocoa: mouse)) else { return }
+        pressed = window
+        startMouse = mouse
     }
 
     private func mouseDragged() {
-        guard let window = dragged, let startFrame, !gaveUp else { return }
+        guard let pressed, !gaveUp else { return }
         let mouse = NSEvent.mouseLocation
 
         if !isMoving {
-            // Only treat this as a window move once the window's origin changes but its size doesn't
-            // (i.e. a title-bar drag, not a resize or a text selection).
-            guard let frame = window.frame else { gaveUp = true; return }
-            let sameSize = abs(frame.width - startFrame.width) < 1 && abs(frame.height - startFrame.height) < 1
-            if sameSize && frame.origin != startFrame.origin {
-                isMoving = true
-            } else if hypot(mouse.x - startMouse.x, mouse.y - startMouse.y) > 80 || !sameSize {
+            // It's a window move once the window's origin changes but its size doesn't
+            // (a title-bar drag, not a resize, a text selection or a drag inside the window).
+            guard let bounds = WindowQuery.bounds(of: pressed.id) else { gaveUp = true; return }
+            let sameSize = abs(bounds.width - pressed.bounds.width) < 1 && abs(bounds.height - pressed.bounds.height) < 1
+            if sameSize && bounds.origin != pressed.bounds.origin {
+                beginMove(pressed)
+            } else if !sameSize || hypot(mouse.x - startMouse.x, mouse.y - startMouse.y) > 80 {
                 gaveUp = true
             }
-            return
+            if !isMoving { return }
         }
 
-        updateTarget(cursor: mouse, dragged: window)
+        // Keep the group's tab bar glued to the window while it moves (AX move notifications are too
+        // infrequent for a smooth follow).
+        if let draggedGroup {
+            let origin = CGPoint(x: pressed.bounds.minX + (mouse.x - startMouse.x),
+                                 y: pressed.bounds.minY - (mouse.y - startMouse.y))
+            TabGroupManager.shared.follow(draggedGroup, windowOrigin: origin)
+        }
+        updateTarget(cursor: mouse)
     }
 
-    private func updateTarget(cursor: CGPoint, dragged: AXWindow) {
-        target = computeTarget(cursor: cursor, dragged: dragged)
+    private func beginMove(_ pressed: ScreenWindow) {
+        guard let window = WindowQuery.axWindow(for: pressed), !window.isFullScreen else {
+            gaveUp = true
+            Log.drag.notice("Drag ignored: no Accessibility window for CG window \(pressed.id, privacy: .public)")
+            return
+        }
+        isMoving = true
+        dragged = window
+        draggedGroup = TabGroupManager.shared.group(containing: window)
+        lookThrough = Set(draggedGroup?.windows.compactMap(\.windowID) ?? []).union([pressed.id])
+        let app = NSRunningApplication(processIdentifier: pressed.pid)?.localizedName ?? "?"
+        Log.drag.debug("Moving \(app, privacy: .public) window \(pressed.id, privacy: .public)")
+    }
+
+    private func updateTarget(cursor: CGPoint) {
+        target = computeTarget(cursor: cursor)
         switch target {
-        case .snap(let rect)?: preview.show(rect)
-        case .tab(_, let rect)?: preview.show(rect)
+        case .snap(let rect)?: preview.show(rect, style: .snap)
+        case .tab(let c, let ready)?: preview.show(c.rect, style: ready ? .tabReady : .tabHold)
         case nil: preview.hide()
         }
     }
@@ -100,117 +139,132 @@ final class DragController {
     private func mouseUp() {
         defer { reset() }
         preview.hide()
-        guard isMoving, let window = dragged, let target else { return }
+        guard isMoving, let window = dragged else { return }
+        let group = draggedGroup
 
-        // Let the app finish its own drag handling before we move the window.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-            MainActor.assumeIsolated {
-                switch target {
-                case .snap(let rect):
-                    WindowMover.move(window, toCocoa: rect)
-                case .tab(let other, _):
-                    TabGroupManager.shared.addToGroup(target: other, window: window)
+        // Let the app finish its own drag handling before moving the window.
+        let delay = DispatchTime.now() + 0.06
+        switch target {
+        case .snap(let rect)?:
+            Log.drag.notice("Snap to \(rect.debugDescription, privacy: .public)")
+            DispatchQueue.main.asyncAfter(deadline: delay) {
+                MainActor.assumeIsolated { WindowMover.move(window, toCocoa: rect) }
+            }
+
+        case .tab(let c, ready: true)?:
+            guard let other = c.group?.active ?? c.window.flatMap(WindowQuery.axWindow(for:)) else {
+                Log.drag.error("Tab drop: target window not found")
+                return
+            }
+            Log.drag.notice("Tab drop onto window \(other.windowID ?? 0, privacy: .public)")
+            DispatchQueue.main.asyncAfter(deadline: delay) {
+                MainActor.assumeIsolated { TabGroupManager.shared.addToGroup(target: other, window: window) }
+            }
+
+        default:
+            if let group {
+                DispatchQueue.main.asyncAfter(deadline: delay) {
+                    MainActor.assumeIsolated { TabGroupManager.shared.dragEnded(group) }
                 }
             }
         }
     }
 
     private func reset() {
-        dragged = nil
-        startFrame = nil
+        pressed = nil
         isMoving = false
         gaveUp = false
+        dragged = nil
+        draggedGroup = nil
+        lookThrough = []
         target = nil
-        lastTabProbe = 0
-        tabCandidate = nil
+        lastProbe = 0
+        lastProbeHit = 0
+        candidate = nil
         dwellCheck?.cancel()
         dwellCheck = nil
     }
 
     // MARK: - Target detection
 
-    private func computeTarget(cursor: CGPoint, dragged: AXWindow) -> DropTarget? {
-        if Settings.dragToSnap, let zone = edgeZone(for: cursor),
-           let screen = Geometry.screen(containingCocoa: cursor) {
-            tabCandidate = nil   // coming back to a window restarts its dwell
+    private func computeTarget(cursor: CGPoint) -> DropTarget? {
+        if Settings.dragToSnap, let screen = Geometry.screen(containingCocoa: cursor),
+           let zone = edgeZone(for: cursor, on: screen) {
+            candidate = nil   // coming back to a window restarts its hold
             return .snap(zone.rect(in: screen.visibleFrame))
         }
         guard Settings.dragToTab else { return nil }
 
-        // CGWindowList is relatively expensive; probe at most ~16 times a second.
-        let now = ProcessInfo.processInfo.systemUptime
-        if now - lastTabProbe >= 0.06 {
-            lastTabProbe = now
-            let probe = tabTarget(cursor: cursor, dragged: dragged)
-            if probe?.window != tabCandidate?.window {
-                tabCandidateSince = now
-                scheduleDwellCheck(dragged: dragged)
+        // CGWindowList is cheap but not free; probe ~20 times a second.
+        let time = now
+        if time - lastProbe >= 0.05 {
+            lastProbe = time
+            if let probe = tabProbe(cursor: cursor) {
+                lastProbeHit = time
+                if probe.key != candidate?.key {
+                    candidateSince = time
+                    scheduleDwellCheck()
+                }
+                candidate = probe
+            } else if time - lastProbeHit > probeGrace {
+                candidate = nil
             }
-            tabCandidate = probe
         }
-        guard let tabCandidate, now - tabCandidateSince >= tabDwell else { return nil }
-        return .tab(tabCandidate.window, tabCandidate.rect)
+        guard let candidate else { return nil }
+        return .tab(candidate, ready: time - candidateSince >= tabDwell)
     }
 
-    /// Mouse-dragged events stop while the cursor is held still, so re-check once the dwell has passed.
-    private func scheduleDwellCheck(dragged: AXWindow) {
+    /// Mouse-dragged events stop while the cursor is held still, so re-check once the hold time has passed.
+    private func scheduleDwellCheck() {
         dwellCheck?.cancel()
         let work = DispatchWorkItem { [weak self] in
             MainActor.assumeIsolated {
-                guard let self, self.isMoving, self.dragged == dragged, self.tabCandidate != nil else { return }
-                self.updateTarget(cursor: NSEvent.mouseLocation, dragged: dragged)
+                guard let self, self.isMoving, self.candidate != nil else { return }
+                self.updateTarget(cursor: NSEvent.mouseLocation)
             }
         }
         dwellCheck = work
         DispatchQueue.main.asyncAfter(deadline: .now() + tabDwell + 0.02, execute: work)
     }
 
-    private func edgeZone(for cursor: CGPoint) -> SnapZone? {
-        guard let screen = Geometry.screen(containingCocoa: cursor) else { return nil }
-        let f = screen.frame
-        if cursor.x <= f.minX + edgeThreshold {
-            if cursor.y >= f.maxY - cornerSize { return .topLeft }
-            if cursor.y <= f.minY + cornerSize { return .bottomLeft }
-            return .leftHalf
+    private func edgeZone(for cursor: CGPoint, on screen: NSScreen) -> SnapZone? {
+        let f = screen.frame, v = screen.visibleFrame
+        let dockLeft = v.minX > f.minX + 1, dockRight = v.maxX < f.maxX - 1
+        let atLeft = cursor.x <= f.minX + edgeThreshold || (dockLeft && cursor.x <= v.minX)
+        let atRight = cursor.x >= f.maxX - edgeThreshold || (dockRight && cursor.x >= v.maxX)
+        if atLeft || atRight {
+            if cursor.y >= f.maxY - cornerSize { return atLeft ? .topLeft : .topRight }
+            if cursor.y <= f.minY + cornerSize { return atLeft ? .bottomLeft : .bottomRight }
+            return atLeft ? .leftHalf : .rightHalf
         }
-        if cursor.x >= f.maxX - edgeThreshold {
-            if cursor.y >= f.maxY - cornerSize { return .topRight }
-            if cursor.y <= f.minY + cornerSize { return .bottomRight }
-            return .rightHalf
-        }
-        if cursor.y >= f.maxY - edgeThreshold {
+        // Top edge, including anywhere in the menu bar.
+        if cursor.y >= min(f.maxY - edgeThreshold, v.maxY) {
             return .maximize
         }
         return nil
     }
 
-    private func tabTarget(cursor: CGPoint, dragged: AXWindow) -> (window: AXWindow, rect: CGRect)? {
-        let axPoint = Geometry.axPoint(fromCocoa: cursor)
+    /// The tab drop zone under the cursor: a group's tab bar, or the top part of another window
+    /// (plus the bar when that window is grouped).
+    private func tabProbe(cursor: CGPoint) -> TabCandidate? {
+        let point = Geometry.axPoint(fromCocoa: cursor)
+        let manager = TabGroupManager.shared
 
-        // The tab bar is Paneful's own panel, so CGWindowList (which skips our windows) can't find
-        // a group when the cursor is over its bar. Check visible bars first.
-        let ownGroup = TabGroupManager.shared.group(containing: dragged)
-        if let group = TabGroupManager.shared.group(withVisibleBarAtAX: axPoint),
-           group !== ownGroup, let active = group.active {
-            return (active, Geometry.toCocoa(group.outerFrame))
+        if let group = manager.group(withVisibleBarAtAX: point), group !== draggedGroup {
+            return TabCandidate(key: .group(group.id), window: nil, group: group,
+                                rect: Geometry.toCocoa(group.outerFrame))
         }
 
-        guard let other = WindowQuery.window(belowAX: axPoint, excluding: dragged),
-              other != dragged,
-              let otherFrame = other.frame else { return nil }
-
-        // Hidden tabs of the dragged window's own group sit underneath it; ignore them.
-        if let ownGroup, ownGroup.windows.contains(other) {
+        guard let under = WindowQuery.topWindow(atAX: point, excluding: lookThrough, blockedByOwn: false) else {
             return nil
         }
+        let group = manager.group(withWindowID: under.id)
+        if let group, group === draggedGroup { return nil }
 
-        // If the window under the cursor is already in a group, the drop zone is the group's tab bar.
-        let groupFrame = TabGroupManager.shared.group(containing: other)?.outerFrame
-        let outer = groupFrame ?? otherFrame
-        let stripTop = outer.minY
-        guard axPoint.y >= stripTop, axPoint.y <= stripTop + tabStripHeight + (groupFrame == nil ? 0 : TabBarPanel.height) else {
-            return nil
-        }
-        return (other, Geometry.toCocoa(outer))
+        let outer = group?.outerFrame ?? under.bounds
+        let zoneBottom = outer.minY + (group == nil ? 0 : TabBarPanel.height) + tabZoneHeight
+        guard point.y >= outer.minY, point.y <= zoneBottom else { return nil }
+        return TabCandidate(key: group.map { .group($0.id) } ?? .window(under.id), window: under,
+                            group: group, rect: Geometry.toCocoa(outer))
     }
 }

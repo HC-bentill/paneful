@@ -1,6 +1,11 @@
 import AppKit
 import ApplicationServices
 
+/// Private but long-stable HIServices call (used by Rectangle, AltTab, Hammerspoon…): the CGWindowID
+/// behind an Accessibility window element.
+@_silgen_name("_AXUIElementGetWindow") @discardableResult
+private func _AXUIElementGetWindow(_ element: AXUIElement, _ windowID: inout CGWindowID) -> AXError
+
 /// A thin wrapper around another app's window, controlled through the Accessibility API.
 ///
 /// Coordinates are in "AX space": origin at the top-left of the primary screen, y grows downward.
@@ -89,10 +94,33 @@ struct AXWindow: Hashable {
     }
 
     /// Size → position → size: the second resize fixes apps that clamp size to the current screen.
+    ///
+    /// Chromium and Electron apps (Brave, Chrome, VS Code, Teams, Notion…) often have
+    /// `AXEnhancedUserInterface` switched on. Their windows then animate Accessibility frame changes and
+    /// drop some of them, so it is switched off while the frame is set (the same workaround Rectangle uses).
+    /// Prefer `FrameKeeper.place`, which also checks that the change stuck.
     func setFrame(_ rect: CGRect) {
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, 0.5)
+        let enhanced = (Self.value(of: app, Self.enhancedUserInterface) as? Bool) == true
+        if enhanced {
+            AXUIElementSetAttributeValue(app, Self.enhancedUserInterface as CFString, kCFBooleanFalse)
+        }
         setSize(rect.size)
         setPosition(rect.origin)
         setSize(rect.size)
+        if enhanced {
+            AXUIElementSetAttributeValue(app, Self.enhancedUserInterface as CFString, kCFBooleanTrue)
+        }
+    }
+
+    private static let enhancedUserInterface = "AXEnhancedUserInterface"
+
+    /// The window's CoreGraphics window number (same as `kCGWindowNumber`), used to match it in
+    /// CGWindowList and to order Paneful's tab bar directly above it.
+    var windowID: CGWindowID? {
+        var id: CGWindowID = 0
+        return _AXUIElementGetWindow(element, &id) == .success && id != 0 ? id : nil
     }
 
     /// Brings this window to the front and activates its app.

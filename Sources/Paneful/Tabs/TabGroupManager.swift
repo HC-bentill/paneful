@@ -74,6 +74,10 @@ final class TabGroupManager {
     private var pendingSync: [UUID: DispatchWorkItem] = [:]
     private var iconCache: [pid_t: NSImage] = [:]
     private var focusFollowPausedUntil: TimeInterval = 0
+    private var windowIDs: [AXWindow: CGWindowID] = [:]
+    /// When a window was last put back in place by the self-check, to back off from apps that resist.
+    private var healedAt: [AXWindow: TimeInterval] = [:]
+    private var tickCount = 0
 
     // Auto-tabbing of remembered windows.
     /// Per app: windows already judged. They are never auto-tabbed (again).
@@ -105,6 +109,9 @@ final class TabGroupManager {
         center.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { _ in
             MainActor.assumeIsolated { TabGroupManager.shared.refresh() }
         }
+        center.addObserver(forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { TabGroupManager.shared.refresh() }
+        }
         center.addObserver(forName: NSWorkspace.didLaunchApplicationNotification, object: nil, queue: .main) { note in
             guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
             let pid = app.processIdentifier
@@ -120,7 +127,7 @@ final class TabGroupManager {
         restoring = true
         scanForRememberedWindows()
         restoring = false
-        if !groups.isEmpty { NSLog("Paneful: loaded %d remembered group(s)", groups.count) }
+        Log.tabs.notice("Loaded \(self.groups.count, privacy: .public) remembered group(s), \(self.groups.filter(\.isFormed).count, privacy: .public) re-formed")
     }
 
     // MARK: - Queries
@@ -133,6 +140,18 @@ final class TabGroupManager {
     /// The group whose (visible) tab bar is under an AX-space point.
     func group(withVisibleBarAtAX point: CGPoint) -> TabGroup? {
         groups.first { ($0.bar?.isVisible ?? false) && $0.barFrame.contains(point) }
+    }
+
+    /// The formed group showing the window-server window `id` as one of its tabs.
+    func group(withWindowID id: CGWindowID) -> TabGroup? {
+        groups.first { $0.isFormed && $0.windows.contains { windowID(of: $0) == id } }
+    }
+
+    func windowID(of window: AXWindow) -> CGWindowID? {
+        if let cached = windowIDs[window] { return cached }
+        let id = window.windowID
+        windowIDs[window] = id
+        return id
     }
 
     /// The remembered group a window belongs to, formed or not (includes minimized members).
@@ -176,10 +195,14 @@ final class TabGroupManager {
         // App activation is asynchronous; don't let the next tick see the old app still frontmost
         // and switch the active tab back.
         focusFollowPausedUntil = now + 0.6
-        window.setFrame(group.contentFrame)
+        FrameKeeper.shared.place(window, group.contentFrame)
         window.focus()
         updateBar(group)
-        group.bar?.show()
+        placeBars()
+        // The app raises its window a moment later; put the bar back on top of it.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            MainActor.assumeIsolated { TabGroupManager.shared.placeBars() }
+        }
     }
 
     func cycle(from window: AXWindow?, by delta: Int) {
@@ -200,10 +223,11 @@ final class TabGroupManager {
         var content = outer
         content.origin.y += TabBarPanel.height
         content.size.height -= TabBarPanel.height
-        group.contentFrame = content
-        group.windows.forEach { $0.setFrame(content) }
+        group.contentFrame = fitted(content)
+        group.windows.forEach { FrameKeeper.shared.place($0, group.contentFrame) }
         group.active?.focus()
         updateBar(group)
+        placeBars()
         save()
     }
 
@@ -261,7 +285,7 @@ final class TabGroupManager {
         if focus {
             activate(group, window: newcomer)
         } else {
-            newcomer.setFrame(group.contentFrame)
+            FrameKeeper.shared.place(newcomer, group.contentFrame)
             updateBar(group)
         }
     }
@@ -270,18 +294,20 @@ final class TabGroupManager {
         var content = frame
         content.origin.y += TabBarPanel.height
         content.size.height -= TabBarPanel.height
-        group.contentFrame = content
+        group.contentFrame = fitted(content)
         group.activeWindow = active
         group.bar = makeBar(for: group)
-        group.windows.forEach { $0.setFrame(content) }
+        group.windows.forEach { FrameKeeper.shared.place($0, group.contentFrame) }
         updateBar(group)
+        placeBars()
+        Log.tabs.notice("Formed group \(group.displayName, privacy: .public)")
     }
 
     /// Hides the tab bar and gives its space back to the windows. The group stays remembered.
     private func unform(_ group: TabGroup) {
         guard let bar = group.bar else { return }
         let outer = group.outerFrame
-        group.windows.forEach { $0.setFrame(outer) }
+        group.windows.forEach { FrameKeeper.shared.place($0, outer) }
         bar.close()
         group.bar = nil
         pendingSync[group.id]?.cancel()
@@ -293,8 +319,9 @@ final class TabGroupManager {
         guard let index = group.memberIndex(of: window) else { return }
         unobserve(window)
         group.members.remove(at: index)
+        windowIDs[window] = nil
         if let placeAt {
-            window.setFrame(placeAt)
+            FrameKeeper.shared.place(window, placeAt)
             window.focus()
         }
         reconcile(group, focusNext: false)
@@ -305,6 +332,8 @@ final class TabGroupManager {
     private func windowGone(_ window: AXWindow, in group: TabGroup) {
         guard let index = group.memberIndex(of: window) else { return }
         unobserve(window)
+        windowIDs[window] = nil
+        healedAt[window] = nil
         group.members[index].window = nil
         group.members[index].minimized = false
         reconcile(group, focusNext: true)
@@ -337,7 +366,13 @@ final class TabGroupManager {
         } else if let next = group.active, next != group.activeWindow {
             // The visible tab left: show the next one.
             group.activeWindow = next
-            if focusNext { activate(group, window: next) } else { next.setFrame(group.contentFrame); updateBar(group) }
+            if focusNext {
+                activate(group, window: next)
+            } else {
+                FrameKeeper.shared.place(next, group.contentFrame)
+                updateBar(group)
+                placeBars()
+            }
         } else {
             updateBar(group)
         }
@@ -453,7 +488,7 @@ final class TabGroupManager {
 
         best.group.members[best.index].window = window
         observe(window)
-        NSLog("Paneful: \"%@\" rejoined remembered group %@", title, best.group.displayName)
+        Log.tabs.notice("\"\(title, privacy: .public)\" rejoined remembered group \(best.group.displayName, privacy: .public)")
         layoutAfterJoin(best.group, newcomer: window, focus: focus)
         save()
         return true
@@ -556,20 +591,121 @@ final class TabGroupManager {
 
         let formed = groups.filter(\.isFormed)
         guard !formed.isEmpty else { return }
+        tickCount += 1
         let focused = WindowQuery.focusedWindow()
         let followFocus = now >= focusFollowPausedUntil
         for group in formed {
             if let focused, group.windows.contains(focused) {
                 if focused != group.activeWindow, followFocus {
                     group.activeWindow = focused
-                    focused.setFrame(group.contentFrame)
+                    FrameKeeper.shared.place(focused, group.contentFrame)
                 }
                 updateBar(group)
-                group.bar?.show()
-            } else {
-                group.bar?.hide()
             }
         }
+        // Not while the mouse is down: the user may be dragging or resizing a window right now.
+        if NSEvent.pressedMouseButtons == 0 {
+            formed.forEach { keepInPlace($0, checkHiddenTabs: tickCount % 3 == 0) }
+        }
+        placeBars(focused: focused)
+    }
+
+    /// Self-check: keeps a group's windows stacked and its bar clear of the windows, even when an app moved
+    /// a window on its own, ignored a frame change, or an Accessibility notification was missed.
+    private func keepInPlace(_ group: TabGroup, checkHiddenTabs: Bool) {
+        guard let active = group.active, !FrameKeeper.shared.isPlacing(active),
+              let frame = active.frame else { return }
+        var changed = false
+        if !frame.isRoughly(group.contentFrame) {
+            // The visible tab moved or resized: the group follows it, keeping room for the bar.
+            group.contentFrame = fitted(frame)
+            if !group.contentFrame.isRoughly(frame) { heal(active, to: group.contentFrame) }
+            changed = true
+        } else if !fitted(group.contentFrame).isRoughly(group.contentFrame) {
+            // No room for the bar above the windows (e.g. the window was zoomed to full height).
+            group.contentFrame = fitted(group.contentFrame)
+            heal(active, to: group.contentFrame)
+            changed = true
+        }
+        if changed || checkHiddenTabs {
+            for window in group.windows where window != active && !FrameKeeper.shared.isPlacing(window) {
+                if let f = window.frame, !f.isRoughly(group.contentFrame) {
+                    heal(window, to: group.contentFrame)
+                }
+            }
+        }
+        if changed {
+            group.bar?.setFrame(ax: group.barFrame)
+            save()
+        }
+    }
+
+    private func heal(_ window: AXWindow, to rect: CGRect) {
+        // Back off from a window that keeps refusing (e.g. its app enforces a minimum size).
+        if let last = healedAt[window], now - last < 5 { return }
+        healedAt[window] = now
+        let app = NSRunningApplication(processIdentifier: window.pid)?.localizedName ?? "?"
+        Log.tabs.notice("Re-stacking \(app, privacy: .public) window into its group")
+        FrameKeeper.shared.place(window, rect)
+    }
+
+    /// Moves `content` down if needed so the tab bar fits between it and the menu bar (AX coords).
+    private func fitted(_ content: CGRect) -> CGRect {
+        guard let screen = Geometry.screen(forAX: content) else { return content }
+        let visible = Geometry.toAX(screen.visibleFrame)
+        let top = visible.minY + TabBarPanel.height
+        guard content.minY < top - 0.5 else { return content }
+        var fitted = content
+        fitted.origin.y = top
+        fitted.size.height = max(200, content.maxY - top)
+        return fitted
+    }
+
+    /// Shows every formed group's bar whose visible window is on screen (on this Space), ordered directly
+    /// above that window, and hides the others.
+    func placeBars(focused: AXWindow? = nil) {
+        let formed = groups.filter(\.isFormed)
+        guard !formed.isEmpty else { return }
+        let onScreen = WindowQuery.onScreenWindows()
+        var index: [CGWindowID: Int] = [:]
+        for (i, w) in onScreen.enumerated() { index[w.id] = i }
+        let focusedWindow = focused ?? WindowQuery.focusedWindow()
+
+        for group in formed {
+            guard let bar = group.bar else { continue }
+            guard let active = group.active, let wid = windowID(of: active), let windowIndex = index[wid] else {
+                bar.hide()
+                continue
+            }
+            bar.setFrame(ax: group.barFrame)
+            bar.setFocused(focusedWindow.map { group.windows.contains($0) } ?? false)
+            // Already directly above its window? (CGWindowList is ordered front to back.)
+            let barIndex = index[CGWindowID(bar.windowNumber)]
+            if !bar.isVisible || barIndex != windowIndex - 1 {
+                bar.show(above: wid)
+            }
+        }
+    }
+
+    /// While the user drags a group's visible window: keep the bar glued to it (AX coords origin).
+    func follow(_ group: TabGroup, windowOrigin: CGPoint) {
+        guard group.isFormed else { return }
+        group.contentFrame.origin = windowOrigin
+        group.bar?.setFrame(ax: group.barFrame)
+    }
+
+    /// The user let go of a group's window: settle the group where it landed and bring the hidden tabs.
+    func dragEnded(_ group: TabGroup) {
+        guard group.isFormed, let active = group.active, let frame = active.frame else { return }
+        group.contentFrame = fitted(frame)
+        if !group.contentFrame.isRoughly(frame) { FrameKeeper.shared.place(active, group.contentFrame) }
+        for window in group.windows where window != active {
+            FrameKeeper.shared.place(window, group.contentFrame)
+        }
+        pendingSync[group.id]?.cancel()
+        updateBar(group)
+        placeBars()
+        save()
     }
 
     // MARK: - AX observation
@@ -592,10 +728,17 @@ final class TabGroupManager {
             windowRestored(window, in: group)
 
         case kAXMovedNotification, kAXResizedNotification:
-            // Only the visible (active) window drives the group; the others are moved by us.
-            guard group.isFormed, window == group.active, let frame = window.frame,
-                  !frame.isClose(to: group.contentFrame, tolerance: 0.5) else { return }
-            group.contentFrame = frame
+            // Only the visible (active) window drives the group; the others are moved by us. Frames seen
+            // while Paneful itself is placing the window are in-between states: ignore them.
+            guard group.isFormed, window == group.active, !FrameKeeper.shared.isPlacing(window),
+                  let frame = window.frame, !frame.isClose(to: group.contentFrame, tolerance: 0.5) else { return }
+            if NSEvent.pressedMouseButtons != 0 {
+                // Mid-drag or mid-resize: follow as-is; dragEnded/keepInPlace settle it afterwards.
+                group.contentFrame = frame
+            } else {
+                group.contentFrame = fitted(frame)
+                if !group.contentFrame.isRoughly(frame) { FrameKeeper.shared.place(window, group.contentFrame) }
+            }
             group.bar?.setFrame(ax: group.barFrame)
             scheduleSync(group)
 
@@ -610,15 +753,17 @@ final class TabGroupManager {
         let work = DispatchWorkItem { [weak self, weak group] in
             MainActor.assumeIsolated {
                 guard let self, let group, group.isFormed, self.groups.contains(where: { $0 === group }) else { return }
+                // Still dragging: the drag end (or the next notification) syncs instead.
+                guard NSEvent.pressedMouseButtons == 0 else { return }
                 let active = group.active
                 for window in group.windows where window != active {
-                    window.setFrame(group.contentFrame)
+                    FrameKeeper.shared.place(window, group.contentFrame)
                 }
                 self.save()
             }
         }
         pendingSync[group.id] = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1, execute: work)
     }
 
     private func observer(for pid: pid_t) -> AXObserver? {

@@ -55,7 +55,7 @@ final class GroupStore {
         do {
             return try JSONDecoder().decode(FileContents.self, from: data).groups
         } catch {
-            NSLog("Paneful: could not read \(url.path): \(error)")
+            Log.tabs.error("Could not read \(self.url.path, privacy: .public): \(String(describing: error), privacy: .public)")
             return []
         }
     }
@@ -85,7 +85,7 @@ final class GroupStore {
             let data = try encoder.encode(FileContents(version: 1, groups: groups))
             try data.write(to: url, options: .atomic)
         } catch {
-            NSLog("Paneful: could not save \(url.path): \(error)")
+            Log.tabs.error("Could not save \(self.url.path, privacy: .public): \(String(describing: error), privacy: .public)")
         }
     }
 }

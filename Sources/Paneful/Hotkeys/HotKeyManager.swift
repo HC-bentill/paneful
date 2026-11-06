@@ -27,7 +27,7 @@ final class HotKeyManager {
             refs.append(ref)
             handlers[nextID] = shortcut.action
         } else {
-            NSLog("Paneful: could not register hotkey \(shortcut.keyCode) (status \(status)) — probably used by another app")
+            Log.app.error("Could not register hotkey \(shortcut.keyCode, privacy: .public) (status \(status, privacy: .public)): probably used by another app")
         }
         nextID += 1
     }

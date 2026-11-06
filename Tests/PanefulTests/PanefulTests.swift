@@ -65,3 +65,13 @@ struct GroupStoreTests {
         #expect(decoded[0].contentFrame == group.contentFrame)
     }
 }
+
+@Suite("Frame matching")
+struct FrameMatchTests {
+    @Test func roughlyAllowsSizeSlackButNotPositionDrift() {
+        let target = CGRect(x: 60, y: 71, width: 1740, height: 1098)
+        #expect(CGRect(x: 61, y: 72, width: 1730, height: 1090).isRoughly(target))   // size increments
+        #expect(!CGRect(x: 60, y: 39, width: 1740, height: 1130).isRoughly(target))  // under the tab bar
+        #expect(!CGRect(x: 90, y: 71, width: 1740, height: 1098).isRoughly(target))
+    }
+}

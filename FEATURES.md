@@ -4,6 +4,8 @@ Features are captured from reference screen recordings. Status: ✅ built · �
 
 ## 1. Side-by-side snapping ✅ (v0.1)
 - Drag a window to the left/right screen edge → a blurred preview appears → release to snap to that half.
+  When the Dock is on that side, reaching the Dock counts as the edge. Anywhere in the menu bar counts as the
+  top edge.
 - Drag to a corner → quarter; drag to the top edge → maximize.
 - Keyboard shortcuts for halves, quarters, maximize and center.
 - "Side by side with previous window": the focused window goes left, the window you used before goes right.
@@ -17,8 +19,15 @@ Features are captured from reference screen recordings. Status: ✅ built · �
 - Click a tab to bring that window to the front; the group moves and resizes as one window.
 - Create a group by dragging a window onto another window's title bar, or with ⌃⌥T.
 - Remove a tab with its ✕ / right-click menu, or ⌃⌥W; dissolving a group gives the tab-bar space back.
-- Hold the dragged window over the drop zone for a moment (~0.3 s) before the tab preview appears, so that
-  dragging a window across other windows doesn't group them by accident.
+- The drop zone is the top part of the other window (title bar + toolbar, ~80 pt) or its tab bar. Hovering
+  there shows "Hold to add as a tab". After ~0.3 s it turns into "Release to add as a tab". So dragging a window
+  across other windows doesn't group them by accident, and it's clear where to hold.
+- Every group whose window is on screen shows its tab bar. The bar stacks with its group: other windows in
+  front of the group cover its bar too. The group you're working in is drawn at full strength; others are
+  slightly muted.
+- The active tab is outlined in the system accent colour.
+- The tab bar always fits: if a group's window is resized up to the menu bar, the group moves down so the bar
+  stays visible and never covers the window.
 - Drag a tab down out of the tab bar to tear it off: it becomes a separate window again, under the cursor.
 - Right-click a tab: Move Out of Group, Close Window, Ungroup All.
 - Minimizing a tab takes it out of the group and the next tab takes its place. Un-minimizing puts it back as

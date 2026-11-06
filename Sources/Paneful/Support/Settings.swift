@@ -29,7 +29,7 @@ enum Settings {
             do {
                 if newValue { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
             } catch {
-                NSLog("Paneful: launch-at-login change failed: \(error)")
+                Log.app.error("Launch-at-login change failed: \(String(describing: error), privacy: .public)")
             }
         }
     }

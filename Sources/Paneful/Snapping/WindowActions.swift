@@ -8,7 +8,7 @@ enum WindowMover {
         if let group = TabGroupManager.shared.group(containing: window) {
             TabGroupManager.shared.setOuterFrame(of: group, to: axRect)
         } else {
-            window.setFrame(axRect)
+            FrameKeeper.shared.place(window, axRect)
         }
     }
 }

@@ -53,7 +53,7 @@ Run the unit tests with `swift test`.
 ### Tab groups
 | Action | How |
 |---|---|
-| Make a group / add a tab | Drag a window onto another window's title bar (or an existing tab bar), hold it there for a moment until the preview appears, then let go. Or press ⌃⌥T to tab the focused window with the previous one |
+| Make a group / add a tab | Drag a window onto the top of another window (its title bar or toolbar) or onto a tab bar. Hold it there until the preview says **Release to add as a tab**, then let go. Or press ⌃⌥T to tab the focused window with the previous one |
 | Switch tab | Click it, or ⌃⌥] / ⌃⌥[ |
 | Remove a tab | Hover and click ✕, drag the tab down out of the bar, right-click → Move Out of Group, or ⌃⌥W |
 | Close a tab's window | Right-click → Close Window (the group still remembers it) |

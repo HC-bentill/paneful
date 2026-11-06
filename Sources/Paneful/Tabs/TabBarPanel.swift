@@ -11,6 +11,8 @@ struct TabItem: Identifiable, Equatable {
 @MainActor
 final class TabBarModel: ObservableObject {
     @Published var tabs: [TabItem] = []
+    /// True while the user is working in this group. Other groups' bars are drawn slightly muted.
+    @Published var isFocused = true
 }
 
 /// What the tab bar can ask the tab-group manager to do. Indices refer to `TabItem.id`.
@@ -44,8 +46,11 @@ final class TabBarPanel {
         panel.hasShadow = true
         panel.hidesOnDeactivate = false        // Paneful itself is never the active app
         panel.becomesKeyOnlyIfNeeded = true
-        panel.level = .floating
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
+        // Normal level, ordered directly above the group's visible window (see `show(above:)`), so the bar
+        // stacks with its group: windows in front of the group also cover its bar, and every group's bar
+        // can stay visible. No .canJoinAllSpaces: the bar lives on the Space where its group is.
+        panel.level = .normal
+        panel.collectionBehavior = [.fullScreenAuxiliary, .ignoresCycle]
 
         let root = TabBarView(model: model, actions: actions)
         panel.contentView = FirstMouseHostingView(rootView: root)
@@ -61,8 +66,16 @@ final class TabBarPanel {
 
     var isVisible: Bool { panel.isVisible }
 
-    func show() {
-        if !panel.isVisible { panel.orderFrontRegardless() }
+    /// The bar's window-server number, to find it in CGWindowList.
+    var windowNumber: Int { panel.windowNumber }
+
+    /// Orders the bar directly above another app's window (its group's visible tab).
+    func show(above windowID: CGWindowID) {
+        panel.order(.above, relativeTo: Int(windowID))
+    }
+
+    func setFocused(_ focused: Bool) {
+        if model.isFocused != focused { model.isFocused = focused }
     }
 
     func hide() {
@@ -96,6 +109,7 @@ struct TabBarView: View {
         .padding(.vertical, 3)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .opacity(model.isFocused ? 1 : 0.82)
     }
 }
 
@@ -136,8 +150,13 @@ private struct TabButton: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(
             RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .fill(tab.isActive ? Color.primary.opacity(0.14)
+                .fill(tab.isActive ? Color.accentColor.opacity(0.16)
                                    : (hovering ? Color.primary.opacity(0.06) : Color.clear))
+        )
+        .overlay(
+            // The active tab is outlined in the system accent colour (System Settings → Appearance).
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .strokeBorder(Color.accentColor, lineWidth: tab.isActive ? 1.5 : 0)
         )
         .contentShape(Rectangle())
         .offset(x: dragOffset.width)

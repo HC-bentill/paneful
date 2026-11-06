@@ -12,6 +12,11 @@ agentmemory project id: `macos-window-tabs-tiler`. Recall it for the full histor
   fix what breaks, then build feature 3 (auto-tiling, default OFF).
 - Strict-concurrency build (`-strict-concurrency=complete`) gives only 2 benign "sending" warnings, in the
   permission timer and the AX observer callback. Fix them when moving to Swift 6 language mode.
+- Manual test round 1 (2026-11-06): keyboard snapping, branding and most tab/remember features passed. Drag-snap,
+  drag-to-tab, tab-bar lag, the bar overlapping windows, and groups "floating" until dragged were fixed in round 2
+  (FrameKeeper, CG-based drag tracking, keepInPlace self-check, bars ordered above their window). Waiting on
+  Henry's re-test.
+- Logging: use `Log.<category>` (os.Logger, Support/Log.swift) with `privacy: .public`. NSLog shows up as <private>.
 
 ## Build / run
 ```bash
@@ -19,7 +24,9 @@ swift build                     # compile check
 swift test                      # unit tests (pure logic only)
 ./scripts/bundle.sh debug       # builds build/Paneful.app (ad-hoc signed)
 open build/Paneful.app
-log stream --predicate 'process == "Paneful"'   # NSLog output
+# Logs: use the FULL PATH. zsh has a builtin `log` that silently shadows /usr/bin/log.
+/usr/bin/log stream --level debug --predicate 'subsystem == "io.github.hc-bentill.paneful"'
+/usr/bin/log show --last 30m --info --debug --predicate 'subsystem == "io.github.hc-bentill.paneful"'
 ```
 bundle.sh signs with the first "Apple Development" identity (or `$PANEFUL_SIGN_IDENTITY`), so the Accessibility grant
 survives rebuilds. With no identity it signs ad-hoc, and then you must remove and re-add Paneful in System Settings →
@@ -28,10 +35,18 @@ Privacy & Security → Accessibility after every rebuild.
 ## Architecture (Sources/Paneful)
 - `App/AppDelegate.swift`: status-bar menu (rebuilt in menuNeedsUpdate), permission polling, 0.35s tick
   timer → FocusTracker.update() + TabGroupManager.refresh().
-- `Accessibility/AXWindow.swift`: struct wrapping AXUIElement (frame get/set in AX coords, focus()).
-  `WindowQuery.swift`: focused window, window at a point, and the window below a point via CGWindowList.
-- `Snapping/`: SnapZone (rects in Cocoa coords), PreviewWindow (blurred NSPanel), DragController (global
-  mouse monitors: screen edge → snap, title-bar strip → tab), WindowActions (+ WindowMover, FocusTracker).
+- `Accessibility/AXWindow.swift`: struct wrapping AXUIElement (frame get/set in AX coords, focus()). setFrame turns
+  AXEnhancedUserInterface off while it sets the frame (Chromium/Electron otherwise animate or drop changes).
+  `windowID` = CGWindowID via the private `_AXUIElementGetWindow`.
+  `FrameKeeper.swift`: ALWAYS move windows with FrameKeeper.shared.place(). It re-checks at 0.12/0.4s, re-applies,
+  and logs at 0.75s. isPlacing(w) lets observers ignore in-between frames.
+  `WindowQuery.swift`: CGWindowList helpers (ScreenWindow, topWindow(atAX:), bounds(of:), axWindow(for:)).
+- `Snapping/`: SnapZone (rects in Cocoa coords), PreviewWindow (blurred NSPanel with styles snap / tabHold /
+  tabReady and a label), DragController (global mouse monitors). Drags are tracked with CGWindowList: the window
+  under the cursor at mouse-down; it's a "move" once its CG origin changes at the same size. AX is resolved only
+  then. Screen edge (the Dock area counts as the edge, the menu bar as the top) → snap. The top 80pt of another
+  window, or a tab bar, held for 0.3s → tab. While a grouped window is dragged, follow() moves the bar with the
+  mouse delta, and dragEnded() syncs the hidden tabs at once. WindowActions (+ WindowMover, FocusTracker).
 - `Tabs/TabGroupManager.swift`: all windows in a group share `contentFrame`, and the active one is raised.
   AXObserver watches moved/resized/destroyed/minimized/deminiaturized events, and hidden tabs are synced after
   0.2s debounce. The tab bar shows only while the group is focused.
@@ -43,7 +58,11 @@ Privacy & Security → Accessibility after every rebuild.
   (suspendAll) keep it.
   `GroupStore.swift`: WindowSignature/StoredGroup, JSON at ~/Library/Application Support/Paneful/groups.json
   (debounced 1s save; saveNow on quit).
-  `TabBarPanel.swift`: SwiftUI tab strip in a non-activating NSPanel (height 32) above the group.
+  Every tick: keepInPlace() (the self-check: the group follows its visible window, fitted() keeps room for the bar
+  under the menu bar, and hidden tabs are re-stacked about every 1s) and placeBars(). Every formed group whose
+  visible window is on this Space shows its bar, ordered directly above that window (order(.above, relativeTo:)).
+  `TabBarPanel.swift`: SwiftUI tab strip in a non-activating NSPanel (height 32, level .normal, no canJoinAllSpaces).
+  Active tab: accent fill + 1.5pt accent outline. Unfocused groups' bars are drawn at 82% opacity.
 - `Hotkeys/HotKeyManager.swift`: Carbon RegisterEventHotKey, all ⌃⌥ (arrows, ↩, C, U/I/J/K, S, T, W, [ ]).
 - `Support/Geometry.swift`: AX (top-left origin) ↔ Cocoa (bottom-left origin). `Settings.swift`: UserDefaults
   and SMAppService launch-at-login. `SystemConflicts.swift`: reads com.apple.WindowManager (edge tiling, Stage
