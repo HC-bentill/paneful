@@ -40,8 +40,11 @@ Privacy & Security → Accessibility after every rebuild.
 - Publish: `git tag vX.Y.Z && git push origin vX.Y.Z` → .github/workflows/release.yml runs tests, builds the DMG and
   creates the GitHub Release with both DMG names. Signing and notarization switch on automatically once the repo
   secrets DEVELOPER_ID_P12, DEVELOPER_ID_P12_PASSWORD, APPLE_ID, APPLE_TEAM_ID and APPLE_APP_PASSWORD exist.
-- The landing page (../paneful-landing, React + Vite, not a git repo yet) links to
+- The landing page (../paneful-landing, React + Vite; repo HC-bentill/paneful-desktop-manager-landing-page) is
+  live on Vercel at https://paneful.vercel.app, with docs and animated demos at /docs/ (section anchors such as
+  #tab-groups, #remembered, #shortcuts). It links to
   https://github.com/HC-bentill/paneful/releases/latest/download/Paneful.dmg (constants in src/components/shared.jsx).
+  When a feature ships, add its demo there too (see that repo's README), and link it from README.md here.
 - macOS 27 is Apple-silicon only, so arm64-only builds are fine.
 
 ## Architecture (Sources/Paneful)

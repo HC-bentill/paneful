@@ -4,6 +4,12 @@
 
 **Snap windows side by side and group windows from any app into tabs, on macOS.**
 
+<p align="center">
+  <a href="https://paneful.vercel.app"><b>Website</b></a> ·
+  <a href="https://paneful.vercel.app/docs/"><b>Docs &amp; demos</b></a> ·
+  <a href="https://github.com/HC-bentill/paneful/releases/latest/download/Paneful.dmg"><b>Download</b></a>
+</p>
+
 Paneful is a free, open-source menu-bar app for macOS. It brings two things macOS doesn't have:
 
 - **Window snapping.** Drag a window to a screen edge (or press a shortcut) and it snaps to half, a quarter
@@ -13,6 +19,7 @@ Paneful is a free, open-source menu-bar app for macOS. It brings two things macO
 - **Remembered groups.** Paneful remembers your tab groups across app restarts, reboots and its own
   relaunches. Quit Teams, reopen it, and its window tabs itself back into the group. New windows float.
 
+The **[documentation](https://paneful.vercel.app/docs/)** has an animated demo for every feature.
 See [FEATURES.md](FEATURES.md) for the full and upcoming feature list (auto-tiling is next).
 
 ## Download
@@ -45,6 +52,11 @@ apps' windows. After you allow it, Paneful starts working without a relaunch.
 Run the unit tests with `swift test`.
 
 ## How to use
+To see each of these in action, watch the animated demos in the [docs](https://paneful.vercel.app/docs/):
+[snapping](https://paneful.vercel.app/docs/#drag-to-snap), [tab groups](https://paneful.vercel.app/docs/#tab-groups),
+[remembered groups](https://paneful.vercel.app/docs/#remembered),
+[shortcuts](https://paneful.vercel.app/docs/#shortcuts) and
+[troubleshooting](https://paneful.vercel.app/docs/#troubleshooting).
 
 ### Snapping
 | Action | How |
@@ -110,6 +122,8 @@ Tests/PanefulTests/ unit tests (swift test)
 
 ## Contributing
 Issues and pull requests are welcome. Please describe the app(s) involved when reporting window glitches.
+The website and docs live in a separate repo,
+[paneful-desktop-manager-landing-page](https://github.com/HC-bentill/paneful-desktop-manager-landing-page).
 
 ## License
 [MIT](LICENSE) © 2026 Henry Bentil
