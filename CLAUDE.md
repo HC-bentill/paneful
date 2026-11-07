@@ -78,6 +78,12 @@ Privacy & Security → Accessibility after every rebuild.
   visible window is on this Space shows its bar, ordered directly above that window (order(.above, relativeTo:)).
   `TabBarPanel.swift`: SwiftUI tab strip in a non-activating NSPanel (height 32, level .normal, no canJoinAllSpaces).
   Active tab: accent fill + 1.5pt accent outline. Unfocused groups' bars are drawn at 82% opacity.
+  Tab drags (TabBarView): sideways = reorder (others slide by one pitch, tab frames measured via a
+  PreferenceKey; on release it glides into the slot, then actions.move → TabGroupManager.moveTab, which
+  reorders `members` with Array.movingLive so closed members keep their place). |dy| > 44pt = pull out
+  (tearOff). `TabDragHint.swift` shows the pill under the bar. Pure math is in `TabReorder.swift` (tested).
+  If Paneful starts while the screen is locked, the restore scan waits for com.apple.screenIsUnlocked (AX
+  can't read or move windows while locked).
 - `Hotkeys/HotKeyManager.swift`: Carbon RegisterEventHotKey, all ⌃⌥ (arrows, ↩, C, U/I/J/K, S, T, W, M, [ ]).
   ⌃⌥M = Minimize Group: TabGroupManager.minimize() sets group.collapsed and marks members minimized before
   the AX calls; restoring any member → restoreGroup() un-minimizes the rest.

@@ -91,6 +91,8 @@ final class TabGroupManager {
     private var unresponsiveUntil: [pid_t: TimeInterval] = [:]
     /// True during the first scan after launch, which claims windows that are already open.
     private var restoring = false
+    /// Paneful started while the screen was locked: that first scan waits for the unlock.
+    private var restorePendingUnlock = false
 
     /// A new window may auto-tab for this long after it first appears (its title can arrive late).
     private static let claimPeriod: TimeInterval = 5
@@ -127,11 +129,45 @@ final class TabGroupManager {
             MainActor.assumeIsolated { TabGroupManager.shared.appTerminated(pid) }
         }
 
-        // Re-form remembered groups from windows that are already open.
+        // Re-form remembered groups from windows that are already open. Other apps' windows can't be read
+        // or moved while the screen is locked, so if Paneful starts then (say, relaunched while the user is
+        // away), wait for the unlock. Until then the tick doesn't scan either, or it would mark the open
+        // windows as already seen and they'd never be restored.
+        if Self.screenIsLocked {
+            restorePendingUnlock = true
+            DistributedNotificationCenter.default().addObserver(
+                forName: Notification.Name("com.apple.screenIsUnlocked"), object: nil, queue: .main) { _ in
+                MainActor.assumeIsolated { TabGroupManager.shared.restoreAfterUnlock() }
+            }
+            Log.tabs.notice("Screen is locked: restoring \(self.groups.count, privacy: .public) remembered group(s) after unlock")
+        } else {
+            restoreOpenWindows()
+        }
+    }
+
+    private func restoreOpenWindows() {
         restoring = true
         scanForRememberedWindows()
         restoring = false
         Log.tabs.notice("Loaded \(self.groups.count, privacy: .public) remembered group(s), \(self.groups.filter(\.isFormed).count, privacy: .public) re-formed")
+    }
+
+    private func restoreAfterUnlock() {
+        guard restorePendingUnlock else { return }
+        // Give apps a moment to come back after the unlock.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+            MainActor.assumeIsolated {
+                let manager = TabGroupManager.shared
+                guard manager.restorePendingUnlock else { return }
+                manager.restorePendingUnlock = false
+                manager.restoreOpenWindows()
+            }
+        }
+    }
+
+    private static var screenIsLocked: Bool {
+        let session = CGSessionCopyCurrentDictionary() as? [String: Any]
+        return (session?["CGSSessionScreenIsLocked"] as? Bool) ?? false
     }
 
     // MARK: - Queries
@@ -207,6 +243,16 @@ final class TabGroupManager {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
             MainActor.assumeIsolated { TabGroupManager.shared.placeBars() }
         }
+    }
+
+    /// Moves a tab to another position in the bar (`from`/`to` count live tabs, left to right). Closed and
+    /// minimized members keep their place in between. The new order is remembered.
+    func moveTab(in group: TabGroup, from: Int, to: Int) {
+        guard let reordered = group.members.movingLive(from: from, to: to, isLive: \.isLive) else { return }
+        group.members = reordered
+        updateBar(group)
+        save()
+        Log.tabs.info("Moved tab \(from, privacy: .public) → \(to, privacy: .public) in \(group.displayName, privacy: .public)")
     }
 
     func cycle(from window: AXWindow?, by delta: Int) {
@@ -559,6 +605,10 @@ final class TabGroupManager {
                 guard let (g, w) = lookup(index) else { return }
                 TabGroupManager.shared.activate(g, window: w)
             },
+            move: { from, to in
+                guard let g = TabGroupManager.shared.groups.first(where: { $0.id == id }) else { return }
+                TabGroupManager.shared.moveTab(in: g, from: from, to: to)
+            },
             remove: { index in
                 guard let (g, w) = lookup(index) else { return }
                 TabGroupManager.shared.forget(w, in: g, placeAt: g.outerFrame.offsetBy(dx: 40, dy: 40))
@@ -642,7 +692,7 @@ final class TabGroupManager {
             }
         }
 
-        scanForRememberedWindows()
+        if !restorePendingUnlock { scanForRememberedWindows() }
 
         let formed = groups.filter(\.isFormed)
         guard !formed.isEmpty else { return }

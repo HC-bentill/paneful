@@ -73,7 +73,8 @@ To see each of these in action, watch the animated demos in the [docs](https://p
 |---|---|
 | Make a group / add a tab | Drag a window onto the top of another window (its title bar or toolbar) or onto a tab bar. Hold it there until the preview says **Release to add as a tab**, then let go. Or press ⌃⌥T to tab the focused window with the previous one |
 | Switch tab | Click it, or ⌃⌥] / ⌃⌥[ |
-| Remove a tab | Hover and click ✕, drag the tab down out of the bar, right-click → Move Out of Group, or ⌃⌥W |
+| Reorder tabs | Drag a tab sideways. The other tabs slide aside, and it stays where you let go (**Release to move the tab here**). The order is remembered |
+| Remove a tab | Hover and click ✕, drag the tab down out of the bar until it says **Release to pull out of the group**, right-click → Move Out of Group, or ⌃⌥W |
 | Close a tab's window | Right-click → Close Window (the group still remembers it) |
 | Ungroup | Right-click a tab → Ungroup All, or the menu-bar menu |
 | Minimize a tab | It leaves the group while minimized and comes back as the active tab when restored |

@@ -28,7 +28,12 @@ Features are captured from reference screen recordings. Status: ✅ built · �
 - The active tab is outlined in the system accent colour.
 - The tab bar always fits: if a group's window is resized up to the menu bar, the group moves down so the bar
   stays visible and never covers the window.
-- Drag a tab down out of the tab bar to tear it off: it becomes a separate window again, under the cursor.
+- Drag a tab sideways to reorder it, like browser tabs: the other tabs slide aside to open a gap, and the tab
+  stays where it's dropped. The order is remembered with the group. A pill under the bar says what letting go
+  will do ("Drag sideways to reorder, or down to pull out" → "Release to move the tab here").
+- Drag a tab well down (or up) out of the tab bar, 44 pt, to tear it off. The pill turns into "Release to pull
+  out of the group", and the window becomes a separate window again, under the cursor. Moving back toward the
+  bar cancels, so a sideways drag that wanders a little never tears a tab off by accident.
 - Right-click a tab: Move Out of Group, Close Window, Minimize Group, Ungroup All.
 - Minimize Group (⌃⌥M, or from the menu-bar menu or a tab's right-click menu) sends every window in the
   group to the Dock. Restoring any one of them brings the whole group back, stacked, with that window as
