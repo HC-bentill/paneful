@@ -62,7 +62,7 @@ Run the unit tests with `swift test`.
 ## How to use
 To see each of these in action, watch the animated demos in the [docs](https://paneful.vercel.app/docs/):
 [snapping](https://paneful.vercel.app/docs/#drag-to-snap), [tab groups](https://paneful.vercel.app/docs/#tab-groups),
-[remembered groups](https://paneful.vercel.app/docs/#remembered),
+[reordering tabs](https://paneful.vercel.app/docs/#reorder-tabs), [remembered groups](https://paneful.vercel.app/docs/#remembered),
 [shortcuts](https://paneful.vercel.app/docs/#shortcuts) and
 [troubleshooting](https://paneful.vercel.app/docs/#troubleshooting).
 
