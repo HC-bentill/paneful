@@ -1,0 +1,55 @@
+name: Bug report
+description: Something isn't working the way it should
+labels: [bug, needs-triage]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for reporting! Window glitches often depend on the specific app, so the more detail the better.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open Safari and Slack
+        2. Drag Slack onto Safari's title bar
+        3. ...
+    validations:
+      required: true
+  - type: input
+    id: apps
+    attributes:
+      label: Apps involved
+      placeholder: Safari 26, Slack 4.x, Finder
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      placeholder: "27.2"
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Paneful version
+      description: Menu bar → About Paneful
+    validations:
+      required: true
+  - type: dropdown
+    id: displays
+    attributes:
+      label: Displays
+      options: [Built-in only, One external, Multiple external, Built-in + external]
+  - type: textarea
+    id: media
+    attributes:
+      label: Screen recording or logs
+      description: Drag in a short recording if you can. Logs come from Console.app, filtered by "Paneful".

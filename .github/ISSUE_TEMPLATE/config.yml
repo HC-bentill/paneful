@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Docs & animated demos
+    url: https://paneful.vercel.app/docs/
+    about: Check the docs and the FAQ first. Many questions are answered there.
+  - name: Questions & ideas (Discussions)
+    url: https://github.com/HC-bentill/paneful/discussions
+    about: Ask a question or share an idea that isn't a bug.
+  - name: Report a security issue
+    url: https://github.com/HC-bentill/paneful/security/advisories/new
+    about: Please report vulnerabilities privately.

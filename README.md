@@ -10,6 +10,14 @@
   <a href="https://github.com/HC-bentill/paneful/releases/latest/download/Paneful.dmg"><b>Download</b></a>
 </p>
 
+<p align="center">
+  <a href="https://github.com/HC-bentill/paneful/actions/workflows/build.yml"><img src="https://github.com/HC-bentill/paneful/actions/workflows/build.yml/badge.svg" alt="Build"></a>
+  <a href="https://github.com/HC-bentill/paneful/releases/latest"><img src="https://img.shields.io/github/v/release/HC-bentill/paneful" alt="Latest release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License"></a>
+  <a href="https://github.com/HC-bentill/paneful/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22"><img src="https://img.shields.io/github/issues/HC-bentill/paneful/good%20first%20issue?color=7057ff&label=good%20first%20issues" alt="Good first issues"></a>
+  <img src="https://img.shields.io/badge/macOS-27.2%2B-black" alt="macOS 27.2+">
+</p>
+
 Paneful is a free, open-source menu-bar app for macOS. It brings two things macOS doesn't have:
 
 - **Window snapping.** Drag a window to a screen edge (or press a shortcut) and it snaps to half, a quarter
@@ -122,8 +130,17 @@ Tests/PanefulTests/ unit tests (swift test)
 - Not on the Mac App Store: window managers can't run inside the App Store sandbox.
 
 ## Contributing
-Issues and pull requests are welcome. Please describe the app(s) involved when reporting window glitches.
-The website and docs live in a separate repo,
+Contributions are very welcome, from your first PR to a whole feature like auto-tiling.
+
+- Read **[CONTRIBUTING.md](CONTRIBUTING.md)** for setup, the code tour and how to test window behaviour.
+- Pick an issue labelled **[good first issue](https://github.com/HC-bentill/paneful/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)**
+  or **[help wanted](https://github.com/HC-bentill/paneful/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22)**.
+- Have a question or idea? Start a [Discussion](https://github.com/HC-bentill/paneful/discussions).
+- Found a bug? Use the bug report template and say which apps are involved.
+
+Please follow our [Code of Conduct](CODE_OF_CONDUCT.md). Report security issues privately (see [SECURITY.md](SECURITY.md)).
+
+The website and the animated docs live in a separate repo,
 [paneful-desktop-manager-landing-page](https://github.com/HC-bentill/paneful-desktop-manager-landing-page).
 
 ## License
