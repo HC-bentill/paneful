@@ -13,6 +13,11 @@ final class TabBarModel: ObservableObject {
     @Published var tabs: [TabItem] = []
     /// True while the user is working in this group. Other groups' bars are drawn slightly muted.
     @Published var isFocused = true
+    /// The tab a dragged file (or text, image…) is held over, highlighted until it opens or the drag moves on.
+    @Published var dropTarget: Int?
+    /// Where each tab sits in the strip (strip coordinates), so a file drag can tell which tab it's over.
+    /// Not published: it changes with layout, and nothing needs redrawing for it.
+    var tabFrames: [Int: CGRect] = [:]
 }
 
 /// What the tab bar can ask the tab-group manager to do. Indices refer to `TabItem.id`.
@@ -22,6 +27,8 @@ struct TabBarActions {
     var move: @MainActor (Int, Int) -> Void
     /// Take the window out of the group (and forget it there).
     var remove: @MainActor (Int) -> Void
+    /// Send the window to the Dock. It stays in the group and comes back as the active tab when restored.
+    var minimize: @MainActor (Int) -> Void
     /// Close the window itself. The group still remembers it.
     var closeWindow: @MainActor (Int) -> Void
     /// Tab pulled out of the bar; the point is where the mouse was released (Cocoa coordinates).
@@ -55,11 +62,17 @@ final class TabBarPanel {
         panel.level = .normal
         panel.collectionBehavior = [.fullScreenAuxiliary, .ignoresCycle]
 
+        self.actions = actions
         let root = TabBarView(model: model, actions: actions) { [weak self] intent in
             self?.showDragHint(intent)
         }
-        panel.contentView = FirstMouseHostingView(rootView: root)
+        let host = TabStripHostingView(rootView: root)
+        host.onDragHover = { [weak self] point in self?.dragHovered(at: point) ?? [] }
+        host.onDrop = { [weak self] point in self?.dropped(at: point) }
+        panel.contentView = host
     }
+
+    private let actions: TabBarActions
 
     /// Positions the bar using an AX-space rect.
     func setFrame(ax rect: CGRect) {
@@ -103,11 +116,120 @@ final class TabBarPanel {
             TabDragHint.shared.hide(owner: ObjectIdentifier(self))
         }
     }
+
+    // MARK: Spring-loaded tabs
+
+    /// How long a dragged file must be held over a tab before that tab opens (like Finder's spring-loaded
+    /// folders), so the file can then be dropped onto its window.
+    static let springLoadDelay: TimeInterval = 0.5
+
+    private var springTab: Int?
+    private var springOpened = false
+    private var springTimer: DispatchWorkItem?
+
+    /// A file, folder, text or image is being dragged over the strip (`point` in the strip view), or has
+    /// left it (`nil`).
+    private func dragHovered(at point: CGPoint?) -> NSDragOperation {
+        guard let point, panel.isVisible, let index = tabIndex(at: point) else {
+            endSpringLoad()
+            return []
+        }
+        if index != springTab {
+            springTimer?.cancel()
+            springTab = index
+            model.dropTarget = index
+            springOpened = model.tabs[index].isActive
+            if !springOpened {
+                let work = DispatchWorkItem { [weak self] in
+                    MainActor.assumeIsolated { self?.openSpringTab() }
+                }
+                springTimer = work
+                DispatchQueue.main.asyncAfter(deadline: .now() + Self.springLoadDelay, execute: work)
+            }
+        }
+        showDragHint(springOpened ? .dropOpened : .dropHold)
+        return .generic
+    }
+
+    /// Dropped onto a tab itself: open it (if the hold hadn't already), and let the drop bounce back so
+    /// nothing is lost. The window below is where the drop belongs.
+    private func dropped(at point: CGPoint) {
+        if let index = tabIndex(at: point), !model.tabs[index].isActive {
+            actions.select(index)
+        }
+        endSpringLoad()
+    }
+
+    private func openSpringTab() {
+        guard let index = springTab, model.tabs.indices.contains(index) else { return }
+        springOpened = true
+        actions.select(index)
+        showDragHint(.dropOpened)
+    }
+
+    private func endSpringLoad() {
+        springTimer?.cancel()
+        springTimer = nil
+        springTab = nil
+        springOpened = false
+        if model.dropTarget != nil { model.dropTarget = nil }
+        showDragHint(nil)
+    }
+
+    /// The tab under a point in the strip view: the one containing it, else the nearest.
+    private func tabIndex(at point: CGPoint) -> Int? {
+        let x = point.x - TabBarView.stripInset.width
+        let slots = model.tabFrames.filter { model.tabs.indices.contains($0.key) }
+        if let hit = slots.first(where: { $0.value.minX <= x && x < $0.value.maxX }) { return hit.key }
+        return slots.min { abs($0.value.midX - x) < abs($1.value.midX - x) }?.key
+    }
 }
 
-/// Lets clicks land on the tab strip even though Paneful never becomes the active app.
-final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
+/// The tab strip's host view.
+/// - Clicks land on the strip even though Paneful never becomes the active app.
+/// - It accepts drags of files, folders, text and images, so holding one over a tab can open that tab.
+final class TabStripHostingView<Content: View>: NSHostingView<Content> {
+    var onDragHover: (@MainActor (CGPoint?) -> NSDragOperation)?
+    var onDrop: (@MainActor (CGPoint) -> Void)?
+
+    required init(rootView: Content) {
+        super.init(rootView: rootView)
+        var types: [NSPasteboard.PasteboardType] = [
+            .fileURL, .URL, .string, .tiff, .png, .pdf, .rtf, .rtfd, .html, .fileContents,
+            NSPasteboard.PasteboardType("com.apple.pasteboard.promised-file-url"),
+            NSPasteboard.PasteboardType("public.data"),
+        ]
+        types += NSFilePromiseReceiver.readableDraggedTypes.map { NSPasteboard.PasteboardType($0) }
+        registerForDraggedTypes(types)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        onDragHover?(convert(sender.draggingLocation, from: nil)) ?? []
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        onDragHover?(convert(sender.draggingLocation, from: nil)) ?? []
+    }
+
+    override func draggingExited(_ sender: NSDraggingInfo?) {
+        _ = onDragHover?(nil)
+    }
+
+    override func draggingEnded(_ sender: NSDraggingInfo) {
+        _ = onDragHover?(nil)
+    }
+
+    override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool { true }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        onDrop?(convert(sender.draggingLocation, from: nil))
+        return false
+    }
 }
 
 // MARK: - SwiftUI
@@ -124,6 +246,8 @@ struct TabBarView: View {
     /// How far (pt) a tab must be pulled up or down to take it out of the group. Well beyond the bar's
     /// own height, so a sideways drag that wanders a little still only reorders.
     static let pullOutDistance: CGFloat = 44
+    /// Padding between the bar's edge and the row of tabs.
+    static let stripInset = CGSize(width: 4, height: 3)
     private static let space = "tabStrip"
 
     @ObservedObject var model: TabBarModel
@@ -161,6 +285,7 @@ struct TabBarView: View {
                 }
                 TabButton(tab: tab,
                           actions: actions,
+                          isDropTarget: model.dropTarget == tab.id,
                           isDragged: drag?.from == tab.id,
                           isPullingOut: drag?.from == tab.id && drag?.pullingOut == true,
                           anyDrag: drag != nil,
@@ -177,10 +302,13 @@ struct TabBarView: View {
             }
         }
         .coordinateSpace(.named(Self.space))
-        .onPreferenceChange(TabFramesKey.self) { frames = $0 }
+        .onPreferenceChange(TabFramesKey.self) { measured in
+            frames = measured
+            model.tabFrames = measured
+        }
         .onChange(of: model.tabs.count) { cancelDrag() }
-        .padding(.horizontal, 4)
-        .padding(.vertical, 3)
+        .padding(.horizontal, Self.stripInset.width)
+        .padding(.vertical, Self.stripInset.height)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .opacity(model.isFocused ? 1 : 0.82)
@@ -222,7 +350,8 @@ struct TabBarView: View {
         dragX = clampedX(translation.width, from: id)
         if !next.pullingOut {
             let centers = model.tabs.indices.map { frames[$0]?.midX ?? 0 }
-            next.target = TabReorder.targetSlot(centers: centers, dragged: id, draggedCenter: own.midX + dragX)
+            next.target = TabReorder.targetSlot(centers: centers, dragged: id,
+                                                draggedMinX: own.minX + dragX, draggedMaxX: own.maxX + dragX)
         }
         if next != drag {
             // The other tabs slide aside to open a gap where the dragged tab will land.
@@ -279,6 +408,8 @@ struct TabBarView: View {
 private struct TabButton: View {
     let tab: TabItem
     let actions: TabBarActions
+    /// A dragged file is held over this tab (it opens after a short hold).
+    let isDropTarget: Bool
     let isDragged: Bool
     let isPullingOut: Bool
     /// Some tab in this bar is being dragged: hover effects are off until it's dropped.
@@ -303,13 +434,14 @@ private struct TabButton: View {
                 .truncationMode(.tail)
             Spacer(minLength: 0)
             if hovering && !anyDrag {
-                Button { actions.remove(tab.id) } label: {
+                // Like the window's red button: the window goes to the Dock and keeps its place in the group.
+                Button { actions.minimize(tab.id) } label: {
                     Image(systemName: "xmark")
                         .font(.system(size: 9, weight: .bold))
                         .frame(width: 16, height: 16)
                 }
                 .buttonStyle(.plain)
-                .help("Move out of group")
+                .help("Minimize to the Dock. Click it there to bring it back as this tab.")
             }
         }
         .padding(.horizontal, 10)
@@ -323,15 +455,16 @@ private struct TabButton: View {
                         .shadow(color: .black.opacity(0.25), radius: 4, y: 1)
                 }
                 RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(tab.isActive ? Color.accentColor.opacity(0.16)
-                                       : ((hovering && !anyDrag) || isDragged ? Color.primary.opacity(0.06) : Color.clear))
+                    .fill(isDropTarget ? Color.accentColor.opacity(0.28)
+                          : tab.isActive ? Color.accentColor.opacity(0.16)
+                          : ((hovering && !anyDrag) || isDragged ? Color.primary.opacity(0.06) : Color.clear))
             }
         )
         .overlay(
             // The active tab is outlined in the system accent colour (System Settings → Appearance).
             RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .strokeBorder(tab.isActive ? Color.accentColor : Color.primary.opacity(0.15),
-                              lineWidth: tab.isActive ? 1.5 : (isDragged ? 1 : 0))
+                .strokeBorder(tab.isActive || isDropTarget ? Color.accentColor : Color.primary.opacity(0.15),
+                              lineWidth: tab.isActive || isDropTarget ? 1.5 : (isDragged ? 1 : 0))
         )
         .contentShape(Rectangle())
         .opacity(isPullingOut ? 0.45 : 1)
@@ -343,12 +476,13 @@ private struct TabButton: View {
         )
         .onHover { hovering = $0 }
         .contextMenu {
+            Button("Minimize Window") { actions.minimize(tab.id) }
             Button("Move Out of Group") { actions.remove(tab.id) }
             Button("Close Window") { actions.closeWindow(tab.id) }
             Divider()
             Button("Minimize Group  ⌃⌥M") { actions.minimizeGroup() }
             Button("Ungroup All") { actions.ungroup() }
         }
-        .help("\(tab.title)\nDrag sideways to reorder. Drag down to pull it out of the group.")
+        .help("\(tab.title)\nDrag sideways to reorder. Drag down to pull it out of the group. Hold a dragged file here to open this tab.")
     }
 }

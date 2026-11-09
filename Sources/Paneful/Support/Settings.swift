@@ -22,6 +22,30 @@ enum Settings {
         set { defaults.set(newValue, forKey: "autoTabRemembered") }
     }
 
+    /// In a tab group, the red close button sends the window to the Dock instead of closing it.
+    static var closeButtonMinimizesTabs: Bool {
+        get { defaults.object(forKey: "closeButtonMinimizesTabs") as? Bool ?? true }
+        set { defaults.set(newValue, forKey: "closeButtonMinimizesTabs") }
+    }
+
+    /// New windows take a tile: the screen splits into a main column and a stack. Off by default.
+    static var autoTiling: Bool {
+        get { defaults.object(forKey: "autoTiling") as? Bool ?? false }
+        set { defaults.set(newValue, forKey: "autoTiling") }
+    }
+
+    /// New windows join the tab group of the window you were using (or start one with it). Off by default.
+    static var autoTabNewWindows: Bool {
+        get { defaults.object(forKey: "autoTabNewWindows") as? Bool ?? false }
+        set { defaults.set(newValue, forKey: "autoTabNewWindows") }
+    }
+
+    /// Apps whose new windows are never tiled or auto-tabbed ("Always Float <app>").
+    static var alwaysFloatBundleIDs: Set<String> {
+        get { Set(defaults.stringArray(forKey: "alwaysFloatBundleIDs") ?? []) }
+        set { defaults.set(newValue.sorted(), forKey: "alwaysFloatBundleIDs") }
+    }
+
     /// Works only when running from the bundled Paneful.app.
     static var launchAtLogin: Bool {
         get { SMAppService.mainApp.status == .enabled }

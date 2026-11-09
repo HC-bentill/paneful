@@ -81,12 +81,32 @@ struct TabReorderTests {
     // Four tabs, 100 pt apart.
     let centers: [CGFloat] = [50, 150, 250, 350]
 
-    @Test func targetSlotFollowsTheDraggedTabsCentre() {
-        #expect(TabReorder.targetSlot(centers: centers, dragged: 3, draggedCenter: 350) == 3)   // not moved
-        #expect(TabReorder.targetSlot(centers: centers, dragged: 3, draggedCenter: 240) == 2)   // past tab 2's centre
-        #expect(TabReorder.targetSlot(centers: centers, dragged: 3, draggedCenter: 10) == 0)
-        #expect(TabReorder.targetSlot(centers: centers, dragged: 0, draggedCenter: 160) == 1)
-        #expect(TabReorder.targetSlot(centers: centers, dragged: 0, draggedCenter: 140) == 0)   // not past yet
+    /// Where tab `index` would be if dragged by `dx` (tabs are 100 pt wide, 100 pt apart).
+    func slot(_ index: Int, dx: CGFloat, centers: [CGFloat]? = nil) -> Int {
+        let minX = CGFloat(index) * 100 + dx
+        return TabReorder.targetSlot(centers: centers ?? self.centers, dragged: index,
+                                     draggedMinX: minX, draggedMaxX: minX + 100)
+    }
+
+    @Test func targetSlotPassesANeighbourHalfwayAcrossIt() {
+        #expect(slot(3, dx: 0) == 3)        // not moved
+        #expect(slot(3, dx: -40) == 3)      // left edge not yet past tab 2's centre
+        #expect(slot(3, dx: -60) == 2)      // past it
+        #expect(slot(0, dx: 40) == 0)
+        #expect(slot(0, dx: 60) == 1)
+        #expect(slot(1, dx: -60) == 0)
+    }
+
+    @Test func endSlotsAreReachable() {
+        // Slid as far as it can go: its edge sits exactly on the end tab's edge.
+        #expect(slot(3, dx: -300) == 0)     // to the front
+        #expect(slot(0, dx: 300) == 3)      // to the back
+        #expect(slot(2, dx: -200) == 0)
+        #expect(slot(1, dx: 200) == 3)
+        // Tabs whose widths differ by a fraction of a point (pixel rounding) still reach both ends.
+        let uneven: [CGFloat] = [49.75, 150.25, 249.5, 350.5]
+        #expect(slot(3, dx: -300, centers: uneven) == 0)
+        #expect(slot(0, dx: 300, centers: uneven) == 3)
     }
 
     @Test func otherTabsSlideAsideToOpenAGap() {
@@ -111,5 +131,69 @@ struct TabReorderTests {
         #expect(members.movingLive(from: 0, to: 1, isLive: live) == ["x", "B", "A", "C"])
         #expect(members.movingLive(from: 1, to: 1, isLive: live) == nil)
         #expect(members.movingLive(from: 0, to: 3, isLive: live) == nil)
+    }
+}
+
+
+@Suite("Auto-tiling layout")
+struct TileLayoutTests {
+    let area = CGRect(x: 0, y: 40, width: 1000, height: 800)   // AX coordinates, below a menu bar
+
+    @Test func oneTileFillsTheScreen() {
+        #expect(TileLayout.frames(in: area, mainRatio: 0.5, weights: [1]) == [area])
+        #expect(TileLayout.frames(in: area, mainRatio: 0.5, weights: []).isEmpty)
+    }
+
+    @Test func secondTileSplitsLeftAndRight() {
+        let frames = TileLayout.frames(in: area, mainRatio: 0.5, weights: [1, 1])
+        #expect(frames == [CGRect(x: 0, y: 40, width: 500, height: 800),
+                           CGRect(x: 500, y: 40, width: 500, height: 800)])
+    }
+
+    @Test func moreTilesStackInTheRightColumn() {
+        let frames = TileLayout.frames(in: area, mainRatio: 0.5, weights: [1, 1, 1, 1])
+        #expect(frames.count == 4)
+        #expect(frames[0] == CGRect(x: 0, y: 40, width: 500, height: 800))   // main tile untouched
+        #expect(frames[1...].allSatisfy { $0.minX == 500 && $0.width == 500 })
+        // Top to bottom, no gaps, filling the column exactly.
+        #expect(frames[1].minY == 40)
+        #expect(frames[1].maxY == frames[2].minY && frames[2].maxY == frames[3].minY)
+        #expect(frames[3].maxY == area.maxY)
+    }
+
+    @Test func ratioIsClamped() {
+        let frames = TileLayout.frames(in: area, mainRatio: 0.95, weights: [1, 1])
+        #expect(frames[0].width == 800)
+    }
+
+    @Test func draggingTheMainTilesEdgeChangesTheRatio() {
+        var main = CGRect(x: 0, y: 40, width: 600, height: 800)
+        var result = TileLayout.resized(index: 0, to: main, in: area, mainRatio: 0.5, weights: [1, 1])
+        #expect(abs(result.mainRatio - 0.6) < 0.001)
+        // The stack tile's left edge is the same border.
+        main = CGRect(x: 300, y: 40, width: 700, height: 800)
+        result = TileLayout.resized(index: 1, to: main, in: area, mainRatio: 0.5, weights: [1, 1])
+        #expect(abs(result.mainRatio - 0.3) < 0.001)
+    }
+
+    @Test func draggingABorderInTheStackResizesBothNeighbours() {
+        // Three stack tiles of 266/267 pt. Drag the middle one's bottom edge down by 100 pt.
+        let before = TileLayout.frames(in: area, mainRatio: 0.5, weights: [1, 1, 1, 1])
+        var middle = before[2]
+        middle.size.height += 100
+        let result = TileLayout.resized(index: 2, to: middle, in: area, mainRatio: 0.5, weights: [1, 1, 1, 1])
+        let after = TileLayout.frames(in: area, mainRatio: result.mainRatio, weights: result.weights)
+        #expect(after[1] == before[1])                                  // the tile above is untouched
+        #expect(abs(after[2].height - middle.height) <= 1)
+        #expect(abs(after[3].height - (before[3].height - 100)) <= 1)   // the one below gave up the space
+        #expect(after[3].maxY == area.maxY)
+    }
+
+    @Test func pointsFindTheirTile() {
+        let frames = TileLayout.frames(in: area, mainRatio: 0.5, weights: [1, 1, 1])
+        #expect(TileLayout.index(of: CGPoint(x: 100, y: 500), in: frames) == 0)
+        #expect(TileLayout.index(of: CGPoint(x: 700, y: 100), in: frames) == 1)
+        #expect(TileLayout.index(of: CGPoint(x: 700, y: 700), in: frames) == 2)
+        #expect(TileLayout.index(of: CGPoint(x: 700, y: 10), in: frames) == nil)
     }
 }

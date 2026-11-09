@@ -13,8 +13,11 @@ final class TabGroup {
         /// The member's window while it exists. `nil` while it's closed or its app isn't running.
         var window: AXWindow?
         var minimized = false
+        /// Its app hid the window instead of closing it (Postman, Teams, Slack… "close" to the background).
+        /// Like a minimized tab, it steps out of the bar until the app shows the window again.
+        var hidden = false
 
-        var isLive: Bool { window != nil && !minimized }
+        var isLive: Bool { window != nil && !minimized && !hidden }
     }
 
     let id: UUID
@@ -82,6 +85,10 @@ final class TabGroupManager {
     private var tickCount = 0
     /// Minimizing takes a moment; until then a window can still look un-minimized to the tick fallback.
     private var minimizeGraceUntil: TimeInterval = 0
+    /// When a member's window was first seen missing from the screen while a groupmate was showing.
+    private var offscreenSince: [AXWindow: TimeInterval] = [:]
+    /// No hidden-window checks until then (a Space switch is animating and the window list is in flux).
+    private var spaceSwitchUntil: TimeInterval = 0
 
     // Auto-tabbing of remembered windows.
     /// Per app: windows already judged. They are never auto-tabbed (again).
@@ -116,7 +123,12 @@ final class TabGroupManager {
             MainActor.assumeIsolated { TabGroupManager.shared.refresh() }
         }
         center.addObserver(forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main) { _ in
-            MainActor.assumeIsolated { TabGroupManager.shared.refresh() }
+            MainActor.assumeIsolated {
+                let manager = TabGroupManager.shared
+                manager.spaceSwitchUntil = manager.now + 1
+                manager.offscreenSince.removeAll()
+                manager.refresh()
+            }
         }
         center.addObserver(forName: NSWorkspace.didLaunchApplicationNotification, object: nil, queue: .main) { note in
             guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
@@ -129,17 +141,16 @@ final class TabGroupManager {
             MainActor.assumeIsolated { TabGroupManager.shared.appTerminated(pid) }
         }
 
+        SystemState.shared.onWake { TabGroupManager.shared.restoreGroupFrames() }
+        SystemState.shared.onResume { TabGroupManager.shared.resumeAfterPause() }
+
         // Re-form remembered groups from windows that are already open. Other apps' windows can't be read
         // or moved while the screen is locked, so if Paneful starts then (say, relaunched while the user is
         // away), wait for the unlock. Until then the tick doesn't scan either, or it would mark the open
         // windows as already seen and they'd never be restored.
-        if Self.screenIsLocked {
+        if SystemState.shared.isPaused {
             restorePendingUnlock = true
-            DistributedNotificationCenter.default().addObserver(
-                forName: Notification.Name("com.apple.screenIsUnlocked"), object: nil, queue: .main) { _ in
-                MainActor.assumeIsolated { TabGroupManager.shared.restoreAfterUnlock() }
-            }
-            Log.tabs.notice("Screen is locked: restoring \(self.groups.count, privacy: .public) remembered group(s) after unlock")
+            Log.tabs.notice("Screen is locked or asleep: restoring \(self.groups.count, privacy: .public) remembered group(s) once it's back")
         } else {
             restoreOpenWindows()
         }
@@ -152,22 +163,37 @@ final class TabGroupManager {
         Log.tabs.notice("Loaded \(self.groups.count, privacy: .public) remembered group(s), \(self.groups.filter(\.isFormed).count, privacy: .public) re-formed")
     }
 
-    private func restoreAfterUnlock() {
-        guard restorePendingUnlock else { return }
-        // Give apps a moment to come back after the unlock.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-            MainActor.assumeIsolated {
-                let manager = TabGroupManager.shared
-                guard manager.restorePendingUnlock else { return }
-                manager.restorePendingUnlock = false
-                manager.restoreOpenWindows()
-            }
+    /// The Mac woke up, the screen was unlocked, or the displays changed, and things have settled.
+    /// Windows were left alone meanwhile; put every group back where it was once more, in case macOS moved
+    /// something late.
+    private func resumeAfterPause() {
+        if restorePendingUnlock {
+            restorePendingUnlock = false
+            restoreOpenWindows()
+            return
         }
+        restoreGroupFrames()
     }
 
-    private static var screenIsLocked: Bool {
-        let session = CGSessionCopyCurrentDictionary() as? [String: Any]
-        return (session?["CGSSessionScreenIsLocked"] as? Bool) ?? false
+    /// Puts every group's windows and bar back at the group's frame. Runs right after waking or unlocking
+    /// (so the screen looks the way it did before the Mac slept) and again once things have settled. Windows
+    /// already in place aren't touched.
+    private func restoreGroupFrames() {
+        guard !restorePendingUnlock else { return }   // not restored since launch yet: the resume does that
+        for group in groups where group.isFormed {
+            // Only if that spot is still on a connected display; otherwise follow the window as usual.
+            guard let screen = Geometry.screen(forAX: group.contentFrame),
+                  Geometry.toAX(screen.frame).intersection(group.contentFrame).area >= group.contentFrame.area / 2
+            else { continue }
+            group.contentFrame = fitted(group.contentFrame)
+            for window in group.windows {
+                if let frame = window.frame, !frame.isRoughly(group.contentFrame) {
+                    FrameKeeper.shared.place(window, group.contentFrame)
+                }
+            }
+            updateBar(group)
+        }
+        placeBars(hideMissing: !SystemState.shared.isSettling)
     }
 
     // MARK: - Queries
@@ -195,8 +221,12 @@ final class TabGroupManager {
     }
 
     /// The remembered group a window belongs to, formed or not (includes minimized members).
-    private func boundGroup(of window: AXWindow) -> TabGroup? {
+    func boundGroup(of window: AXWindow) -> TabGroup? {
         groups.first { $0.memberIndex(of: window) != nil }
+    }
+
+    func group(withID id: UUID) -> TabGroup? {
+        groups.first { $0.id == id }
     }
 
     // MARK: - Grouping (user actions)
@@ -268,17 +298,26 @@ final class TabGroupManager {
         forget(window, in: group, placeAt: group.isFormed ? group.outerFrame.offsetBy(dx: 40, dy: 40) : nil)
     }
 
-    /// Moves/resizes a whole group so that bar + windows fill `outer` (AX coords).
-    func setOuterFrame(of group: TabGroup, to outer: CGRect) {
+    /// Moves/resizes a whole group so that bar + windows fill `outer` (AX coords). `focus` brings its visible
+    /// tab to the front (snapping does; auto-tiling rearranging the screen doesn't).
+    func setOuterFrame(of group: TabGroup, to outer: CGRect, focus: Bool = true) {
         var content = outer
         content.origin.y += TabBarPanel.height
         content.size.height -= TabBarPanel.height
         group.contentFrame = fitted(content)
         group.windows.forEach { FrameKeeper.shared.place($0, group.contentFrame) }
-        group.active?.focus()
+        if focus { group.active?.focus() }
         updateBar(group)
         placeBars()
         save()
+    }
+
+    /// Sends one tab's window to the Dock (the tab's ✕, or its red close button). It keeps its place in the
+    /// group: the next tab takes over now, and restoring it from the Dock brings it back as the active tab.
+    func minimizeTab(_ window: AXWindow) {
+        let app = NSRunningApplication(processIdentifier: window.pid)?.localizedName ?? "?"
+        Log.tabs.notice("Minimizing grouped \(app, privacy: .public) window")
+        window.setMinimized(true)
     }
 
     /// Minimizes every window of the group into the Dock. Restoring any one of them brings the whole group back.
@@ -358,10 +397,17 @@ final class TabGroupManager {
     }
 
     private func form(_ group: TabGroup, around frame: CGRect, active: AXWindow) {
-        var content = frame
-        content.origin.y += TabBarPanel.height
-        content.size.height -= TabBarPanel.height
-        group.contentFrame = fitted(content)
+        if frame.isRoughly(group.contentFrame) {
+            // The window is still where the group left it, already below the bar's spot (the group only
+            // lost its bar for a moment). Making room for the bar again would push the window down and
+            // shorten it by a bar's height every time.
+            group.contentFrame = fitted(group.contentFrame)
+        } else {
+            var content = frame
+            content.origin.y += TabBarPanel.height
+            content.size.height -= TabBarPanel.height
+            group.contentFrame = fitted(content)
+        }
         group.activeWindow = active
         group.bar = makeBar(for: group)
         group.windows.forEach { FrameKeeper.shared.place($0, group.contentFrame) }
@@ -398,11 +444,14 @@ final class TabGroupManager {
     /// A member's window closed, or its app quit. The member stays remembered.
     private func windowGone(_ window: AXWindow, in group: TabGroup) {
         guard let index = group.memberIndex(of: window) else { return }
+        Log.tabs.info("\(group.members[index].signature.appName, privacy: .public) window closed; \(group.displayName, privacy: .public) keeps remembering it")
         unobserve(window)
         windowIDs[window] = nil
         healedAt[window] = nil
         group.members[index].window = nil
         group.members[index].minimized = false
+        group.members[index].hidden = false
+        offscreenSince[window] = nil
         reconcile(group, focusNext: true)
     }
 
@@ -613,6 +662,10 @@ final class TabGroupManager {
                 guard let (g, w) = lookup(index) else { return }
                 TabGroupManager.shared.forget(w, in: g, placeAt: g.outerFrame.offsetBy(dx: 40, dy: 40))
             },
+            minimize: { index in
+                guard let (_, w) = lookup(index) else { return }
+                TabGroupManager.shared.minimizeTab(w)
+            },
             closeWindow: { index in
                 lookup(index)?.1.close()
             },
@@ -680,11 +733,21 @@ final class TabGroupManager {
     /// keeps titles fresh, follows Cmd-Tab / clicks that focus a background tab, and auto-tabs
     /// remembered windows that just opened.
     func refresh() {
+        // Asleep, displays off or locked: windows can't be read, so touch nothing (see SystemState).
+        let state = SystemState.shared
+        if state.isFrozen { return }
+        if state.isSettling {
+            // Just woke or unlocked: keep every tab bar on its window, in case macOS reordered windows, but
+            // decide nothing else until the screens have settled.
+            placeBars(hideMissing: false)
+            return
+        }
+
         // Catch closed and un-minimized windows even if an AX notification was missed.
         for group in groups {
             for window in group.members.compactMap(\.window) {
                 guard let index = group.memberIndex(of: window) else { continue }
-                if window.frame == nil {
+                if window.isGone {
                     windowGone(window, in: group)
                 } else if group.members[index].minimized, now >= minimizeGraceUntil, !window.isMinimized {
                     windowRestored(window, in: group)
@@ -693,6 +756,8 @@ final class TabGroupManager {
         }
 
         if !restorePendingUnlock { scanForRememberedWindows() }
+        if now >= spaceSwitchUntil { checkHiddenWindows() }
+        CloseButtonInterceptor.shared.updateTargets(groups)
 
         let formed = groups.filter(\.isFormed)
         guard !formed.isEmpty else { return }
@@ -713,6 +778,44 @@ final class TabGroupManager {
             formed.forEach { keepInPlace($0, checkHiddenTabs: tickCount % 3 == 0) }
         }
         placeBars(focused: focused)
+    }
+
+    /// Apps such as Postman, Teams or Slack hide a window when you close it, instead of closing it. Its tab
+    /// stayed in the bar with nothing behind it, so the bar vanished and the group looked like loose windows.
+    /// Now a member whose window has left the screen while a groupmate is still showing is treated like a
+    /// minimized tab: the next tab takes over. When the app shows the window again, it comes back as the
+    /// active tab. (A window on another Space, or of an app hidden with ⌘H, doesn't count.)
+    private func checkHiddenWindows() {
+        let onScreen = Set(WindowQuery.onScreenWindows().map(\.id))
+        func showing(_ window: AXWindow) -> Bool { windowID(of: window).map(onScreen.contains) ?? true }
+        let time = now
+        for group in groups {
+            for index in group.members.indices {
+                guard index < group.members.count, let window = group.members[index].window,
+                      !group.members[index].minimized else { continue }
+                if group.members[index].hidden {
+                    guard showing(window) else { continue }
+                    group.members[index].hidden = false
+                    Log.tabs.notice("\(group.members[index].signature.appName, privacy: .public) showed its window again: back in \(group.displayName, privacy: .public)")
+                    layoutAfterJoin(group, newcomer: window, focus: true)
+                    continue
+                }
+                let groupmateShowing = group.windows.contains { $0 != window && showing($0) }
+                let appHidden = NSRunningApplication(processIdentifier: window.pid)?.isHidden ?? false
+                guard group.isFormed, groupmateShowing, !showing(window), !appHidden, !window.isMinimized else {
+                    offscreenSince[window] = nil
+                    continue
+                }
+                // Make sure it's not a window list caught mid-update.
+                let since = offscreenSince[window] ?? time
+                offscreenSince[window] = since
+                guard time - since >= 0.6 else { continue }
+                offscreenSince[window] = nil
+                group.members[index].hidden = true
+                Log.tabs.notice("\(group.members[index].signature.appName, privacy: .public) hid its window instead of closing it: its tab steps aside until it's shown again")
+                reconcile(group, focusNext: true)
+            }
+        }
     }
 
     /// Self-check: keeps a group's windows stacked and its bar clear of the windows, even when an app moved
@@ -767,8 +870,9 @@ final class TabGroupManager {
     }
 
     /// Shows every formed group's bar whose visible window is on screen (on this Space), ordered directly
-    /// above that window, and hides the others.
-    func placeBars(focused: AXWindow? = nil) {
+    /// above that window, and hides the others (unless `hideMissing` is false: right after waking, a window
+    /// can be missing from the window list for a moment).
+    func placeBars(focused: AXWindow? = nil, hideMissing: Bool = true) {
         let formed = groups.filter(\.isFormed)
         guard !formed.isEmpty else { return }
         let onScreen = WindowQuery.onScreenWindows()
@@ -779,7 +883,7 @@ final class TabGroupManager {
         for group in formed {
             guard let bar = group.bar else { continue }
             guard let active = group.active, let wid = windowID(of: active), let windowIndex = index[wid] else {
-                bar.hide()
+                if hideMissing { bar.hide() }
                 continue
             }
             bar.setFrame(ax: group.barFrame)
@@ -834,8 +938,12 @@ final class TabGroupManager {
 
         case kAXMovedNotification, kAXResizedNotification:
             // Only the visible (active) window drives the group; the others are moved by us. Frames seen
-            // while Paneful itself is placing the window are in-between states: ignore them.
+            // while Paneful itself is placing the window are in-between states: ignore them. So are moves
+            // while the screens wake up or change (macOS shuffles windows then; the group is put back after),
+            // unless the mouse is down: that's the user dragging or resizing.
             guard group.isFormed, window == group.active, !FrameKeeper.shared.isPlacing(window),
+                  !SystemState.shared.isFrozen,
+                  !SystemState.shared.isSettling || NSEvent.pressedMouseButtons != 0,
                   let frame = window.frame, !frame.isClose(to: group.contentFrame, tolerance: 0.5) else { return }
             if NSEvent.pressedMouseButtons != 0 {
                 // Mid-drag or mid-resize: follow as-is; dragEnded/keepInPlace settle it afterwards.

@@ -53,7 +53,13 @@ final class GroupStore {
     func load() -> [StoredGroup] {
         guard let data = try? Data(contentsOf: url) else { return [] }
         do {
-            return try JSONDecoder().decode(FileContents.self, from: data).groups
+            let groups = try JSONDecoder().decode(FileContents.self, from: data).groups
+            if !groups.isEmpty {
+                // Keep the last non-empty set of groups seen at launch, in case they're lost by mistake.
+                let backup = url.deletingLastPathComponent().appendingPathComponent("groups.backup.json")
+                try? data.write(to: backup, options: .atomic)
+            }
+            return groups
         } catch {
             Log.tabs.error("Could not read \(self.url.path, privacy: .public): \(String(describing: error), privacy: .public)")
             return []

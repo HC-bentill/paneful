@@ -138,9 +138,18 @@ final class DragController {
 
     private func mouseUp() {
         defer { reset() }
+        AutoTiler.shared.noteMouseUp()   // a tile that changes size now was resized by the user
         preview.hide()
         guard isMoving, let window = dragged else { return }
         let group = draggedGroup
+
+        // Auto-tiling: snapped somewhere on purpose → the window floats. Dropped with no target → it swaps
+        // with the tile under the cursor, joins another display's layout, or slides back into its tile.
+        switch target {
+        case .snap?: AutoTiler.shared.release(window)
+        case .tab(_, ready: true)?: break
+        default: AutoTiler.shared.windowDropped(window, atCocoa: NSEvent.mouseLocation)
+        }
 
         // Let the app finish its own drag handling before moving the window.
         let delay = DispatchTime.now() + 0.06

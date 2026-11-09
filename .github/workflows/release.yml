@@ -12,7 +12,12 @@ name: Release
 #   APPLE_ID                   Apple ID email used for notarization
 #   APPLE_TEAM_ID              10-character team ID
 #   APPLE_APP_PASSWORD         app-specific password for that Apple ID (appleid.apple.com)
-# Without them the DMG is ad-hoc signed and users confirm the first launch in System Settings.
+# Without them, the app is signed with Paneful's self-signed certificate when these secrets exist
+# (create it once with ./scripts/make-signing-cert.sh):
+#   SELF_SIGNED_P12            base64 of build/signing/Paneful-Self-Signed.p12
+#   SELF_SIGNED_P12_PASSWORD   its password
+# That keeps the Accessibility permission across updates. With neither, the build is ad-hoc signed and users
+# switch Paneful on again after each update. Either way users confirm the first launch in System Settings.
 
 on:
   push:
@@ -26,6 +31,7 @@ jobs:
     runs-on: macos-latest
     env:
       HAS_DEVELOPER_ID: ${{ secrets.DEVELOPER_ID_P12 != '' }}
+      HAS_SELF_SIGNED: ${{ secrets.SELF_SIGNED_P12 != '' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -59,6 +65,24 @@ jobs:
           echo "NOTARY_PROFILE=paneful-notary" >> "$GITHUB_ENV"
           echo "NOTARY_KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
 
+      - name: Import the self-signed certificate
+        if: env.HAS_DEVELOPER_ID != 'true' && env.HAS_SELF_SIGNED == 'true'
+        env:
+          P12: ${{ secrets.SELF_SIGNED_P12 }}
+          P12_PASSWORD: ${{ secrets.SELF_SIGNED_P12_PASSWORD }}
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/self-signed.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          echo "$P12" | base64 --decode > "$RUNNER_TEMP/self-signed.p12"
+          security import "$RUNNER_TEMP/self-signed.p12" -k "$KEYCHAIN" -P "$P12_PASSWORD" -T /usr/bin/codesign
+          rm "$RUNNER_TEMP/self-signed.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          echo "PANEFUL_SIGN_IDENTITY=Paneful Self-Signed" >> "$GITHUB_ENV"
+          echo "PANEFUL_KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
+
       - name: Build DMG
         run: ./scripts/make-dmg.sh "${GITHUB_REF_NAME#v}"
 
@@ -73,6 +97,8 @@ jobs:
             if [ "$HAS_DEVELOPER_ID" != "true" ]; then
               echo "2. Open Paneful. macOS says it can't verify the developer: open **System Settings → Privacy & Security**, scroll down and click **Open Anyway** (this build isn't notarized yet)."
               echo "3. Allow Paneful under **Privacy & Security → Accessibility** when asked."
+              echo ""
+              echo "**Updating from an earlier version?** Paneful removes the old version's Accessibility entry by itself and macOS asks again: just switch Paneful on. No need to remove it with – or relaunch."
             else
               echo "2. Open Paneful and allow it under **System Settings → Privacy & Security → Accessibility** when asked."
             fi

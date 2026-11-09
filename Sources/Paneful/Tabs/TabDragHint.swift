@@ -6,17 +6,23 @@ enum TabDragIntent: Equatable {
     case reorder(moved: Bool)
     /// Pulled far enough up or down out of the bar: letting go makes it a separate window again.
     case pullOut
+    /// A file (or text, image…) dragged from anywhere is held over a background tab, which opens shortly.
+    case dropHold
+    /// The tab under a dragged file is open: the file can now be dropped onto its window.
+    case dropOpened
 
     var message: String {
         switch self {
         case .reorder(moved: false): "Drag sideways to reorder, or down to pull out"
         case .reorder(moved: true): "Release to move the tab here"
         case .pullOut: "Release to pull out of the group"
+        case .dropHold: "Hold to open this tab"
+        case .dropOpened: "Now drop it onto the window"
         }
     }
 
     /// "Release to…" states use the accent colour, like "Release to add as a tab".
-    var isReady: Bool { self != .reorder(moved: false) }
+    var isReady: Bool { self != .reorder(moved: false) && self != .dropHold }
 }
 
 /// The pill shown under a tab bar while a tab is dragged, saying what letting go will do.

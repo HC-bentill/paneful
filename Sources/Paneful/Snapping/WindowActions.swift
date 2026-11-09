@@ -25,6 +25,7 @@ enum WindowActions {
     static func snap(_ zone: SnapZone) {
         guard let window = currentWindow, let frame = window.frame,
               let screen = Geometry.screen(forAX: frame) else { return }
+        AutoTiler.shared.release(window)   // snapped somewhere on purpose: it floats now
         WindowMover.move(window, toCocoa: zone.rect(in: screen.visibleFrame))
     }
 
@@ -35,6 +36,8 @@ enum WindowActions {
               let frame = window.frame,
               let screen = Geometry.screen(forAX: frame) else { NSSound.beep(); return }
         let visible = screen.visibleFrame
+        AutoTiler.shared.release(window)
+        AutoTiler.shared.release(other)
         WindowMover.move(window, toCocoa: SnapZone.leftHalf.rect(in: visible))
         WindowMover.move(other, toCocoa: SnapZone.rightHalf.rect(in: visible))
         other.focus()
@@ -67,6 +70,12 @@ enum WindowActions {
     }
 
     static func ungroupAll() { TabGroupManager.shared.ungroupAll() }
+
+    /// ⌃⌥F: takes the focused window out of the auto-tiling layout, or puts it in.
+    static func toggleTiling() {
+        guard let window = currentWindow else { NSSound.beep(); return }
+        AutoTiler.shared.toggle(window)
+    }
 }
 
 /// Remembers the current and previously focused windows (used by "side by side" and "tab with previous").
@@ -83,6 +92,11 @@ final class FocusTracker {
         history.removeAll { $0 == focused }
         history = Array(history.prefix(10))
         current = focused
+    }
+
+    /// The current window, then earlier ones, most recent first, leaving out `window`.
+    func recent(excluding window: AXWindow?) -> [AXWindow] {
+        ([current].compactMap { $0 } + history).filter { $0 != window }
     }
 
     /// Most recent other window that still exists and isn't minimized.

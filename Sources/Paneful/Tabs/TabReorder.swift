@@ -3,12 +3,20 @@ import CoreGraphics
 /// The arithmetic behind dragging a tab sideways to reorder it, like browser tabs.
 /// Slots are tab positions in the bar, left to right.
 enum TabReorder {
-    /// The slot a dragged tab would drop into: the number of *other* tabs whose centre lies to the left
-    /// of the dragged tab's centre.
-    static func targetSlot(centers: [CGFloat], dragged: Int, draggedCenter: CGFloat) -> Int {
+    /// The slot a dragged tab would drop into, given where its left and right edges are now.
+    ///
+    /// Like browser tabs, the dragged tab passes a neighbour once its leading edge crosses that neighbour's
+    /// centre: a tab on the left is passed when the dragged tab's left edge goes past its centre, a tab on
+    /// the right when the dragged tab's right edge does. The dragged tab can slide as far as the first or
+    /// last slot, which puts that edge half a tab past the end tab's centre, so both ends are reachable even
+    /// when tab widths differ by a fraction of a point. (Comparing centres made the end slots a tie that
+    /// rounding often lost.)
+    static func targetSlot(centers: [CGFloat], dragged: Int, draggedMinX: CGFloat, draggedMaxX: CGFloat) -> Int {
         var slot = 0
-        for (index, center) in centers.enumerated() where index != dragged && center < draggedCenter {
-            slot += 1
+        for (index, center) in centers.enumerated() where index != dragged {
+            if index < dragged ? center <= draggedMinX : center < draggedMaxX {
+                slot += 1
+            }
         }
         return slot
     }

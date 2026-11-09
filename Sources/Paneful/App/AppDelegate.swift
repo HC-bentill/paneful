@@ -9,21 +9,57 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var engineStarted = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        guard resolveOtherCopies() else { return }
         setupStatusItem()
 
         if Permissions.isTrusted {
+            Permissions.recordTrusted()
             startEngine()
         } else {
+            // After an update, macOS may still list the previous version's entry, which no longer applies
+            // and stops it from asking again. Clear it so the prompt below appears.
+            Permissions.clearStaleGrantIfUpdated()
             Permissions.prompt()
             // Poll until the user grants Accessibility access, then start without a relaunch.
             permissionTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] timer in
                 MainActor.assumeIsolated {
                     guard Permissions.isTrusted else { return }
                     timer.invalidate()
+                    Permissions.recordTrusted()
                     self?.startEngine()
                 }
             }
         }
+    }
+
+    /// Two copies of Paneful (say, an installed one and a development build) would fight over the same windows,
+    /// and resetting this copy's Accessibility entry would also cut the other one off. Offers to quit the
+    /// other copy. Returns false when this copy is quitting instead.
+    private func resolveOtherCopies() -> Bool {
+        guard let bundleID = Bundle.main.bundleIdentifier else { return true }
+        let others = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
+            .filter { $0.processIdentifier != WindowQuery.ownPID }
+        guard !others.isEmpty else { return true }
+
+        NSApp.activate()
+        let alert = NSAlert()
+        alert.messageText = "Another copy of Paneful is running"
+        let path = others.first?.bundleURL?.path ?? "another location"
+        alert.informativeText = "It's running from \(path). Two copies would fight over the same windows. Quit it and use this one?"
+        alert.addButton(withTitle: "Quit the Other Copy")
+        alert.addButton(withTitle: "Quit This One")
+        guard alert.runModal() == .alertFirstButtonReturn else {
+            NSApp.terminate(nil)
+            return false
+        }
+        others.forEach { $0.terminate() }
+        // Give it a moment to put its windows back and save its groups.
+        let deadline = Date().addingTimeInterval(4)
+        while others.contains(where: { !$0.isTerminated }), Date() < deadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        }
+        Log.app.notice("Quit the other copy of Paneful at \(path, privacy: .public)")
+        return true
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -34,13 +70,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func startEngine() {
         guard !engineStarted else { return }
         engineStarted = true
+        SystemState.shared.start()
         DefaultShortcuts.registerAll()
         dragController.start()
         TabGroupManager.shared.start()
+        CloseButtonInterceptor.shared.start()
+        AutoTiler.shared.start()
         tickTimer = Timer.scheduledTimer(withTimeInterval: 0.35, repeats: true) { _ in
             MainActor.assumeIsolated {
                 FocusTracker.shared.update()
                 TabGroupManager.shared.refresh()
+                AutoTiler.shared.update()
             }
         }
     }
@@ -66,7 +106,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(header)
 
         if !Permissions.isTrusted {
-            menu.addItem(item("⚠︎ Grant Accessibility Access…", #selector(openAccessibility)))
+            if Permissions.clearedStaleGrant {
+                let note = NSMenuItem(title: "Paneful was updated: switch it on again in Accessibility",
+                                      action: nil, keyEquivalent: "")
+                note.isEnabled = false
+                menu.addItem(note)
+            }
+            let grant = item("⚠︎ Grant Accessibility Access…", #selector(openAccessibility))
+            grant.toolTip = "Removes any old Paneful entry, asks again and opens the Accessibility settings, where you switch Paneful on."
+            menu.addItem(grant)
             menu.addItem(.separator())
         }
         if SystemConflicts.edgeTilingOn || SystemConflicts.stageManagerOn {
@@ -106,13 +154,61 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(rememberedGroupsItem())
         menu.addItem(.separator())
 
+        let tiling = toggle("Auto-tile New Windows", Settings.autoTiling, #selector(toggleAutoTiling))
+        tiling.toolTip = "New windows take a tile: the window you were using moves to the left half, new ones stack on the right."
+        menu.addItem(tiling)
+        let tabbing = toggle("Auto-tab New Windows", Settings.autoTabNewWindows, #selector(toggleAutoTabNew))
+        tabbing.toolTip = "New windows join the tab group of the window you were using (or start one with it)."
+        menu.addItem(tabbing)
+        menu.addItem(autoTilingItem())
+        menu.addItem(.separator())
+
         menu.addItem(toggle("Drag to Screen Edge to Snap", Settings.dragToSnap, #selector(toggleDragSnap)))
         menu.addItem(toggle("Drag onto Title Bar to Tab", Settings.dragToTab, #selector(toggleDragTab)))
         menu.addItem(toggle("Auto-tab Remembered Windows", Settings.autoTabRemembered, #selector(toggleAutoTab)))
+        let closeMinimizes = toggle("Close Button Minimizes Tabs", Settings.closeButtonMinimizesTabs,
+                                    #selector(toggleCloseMinimizes))
+        closeMinimizes.toolTip = "In a tab group, the red close button sends the window to the Dock instead of closing it. ⌥-click it to close."
+        menu.addItem(closeMinimizes)
         menu.addItem(toggle("Launch at Login", Settings.launchAtLogin, #selector(toggleLaunchAtLogin)))
         menu.addItem(.separator())
         menu.addItem(item("About Paneful", #selector(about)))
         menu.addItem(NSMenuItem(title: "Quit Paneful", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+    }
+
+    /// "Auto-tiling" submenu: float or tile the focused window, per-app float rule, float everything.
+    private func autoTilingItem() -> NSMenuItem {
+        let root = NSMenuItem(title: "Auto-tiling", action: nil, keyEquivalent: "")
+        let sub = NSMenu()
+        sub.autoenablesItems = false
+        let on = AutoTiler.shared.isEnabled
+
+        let window = WindowActions.currentWindow
+        let tiled = window.map { AutoTiler.shared.isTiled($0) } ?? false
+        let focus = item(tiled ? "Float Focused Window\t⌃⌥F" : "Tile Focused Window\t⌃⌥F", #selector(toggleTiling))
+        focus.isEnabled = on && window != nil
+        sub.addItem(focus)
+
+        let app = NSWorkspace.shared.frontmostApplication
+        if let app, let bundle = app.bundleIdentifier, app.processIdentifier != WindowQuery.ownPID {
+            let floats = AutoTiler.shared.alwaysFloats(bundleID: bundle)
+            let rule = toggle("Always Float \(app.localizedName ?? bundle)", floats, #selector(toggleAlwaysFloat(_:)))
+            rule.representedObject = bundle
+            // Built-in rules (System Settings, installers) can't be switched off; a rule of your own can
+            // be removed even while auto-tiling and auto-tab are off.
+            rule.isEnabled = !AutoTiler.shared.floatsByDefault(bundleID: bundle)
+                && (on || AutoTiler.shared.autoTabsNewWindows || floats)
+            rule.toolTip = "Paneful never tiles or auto-tabs this app's new windows."
+            sub.addItem(rule)
+        }
+
+        let floatAll = item("Float All Windows", #selector(floatAllWindows))
+        floatAll.isEnabled = on
+        floatAll.toolTip = "Stop arranging the current windows and leave them where they are. New windows are still tiled."
+        sub.addItem(floatAll)
+
+        root.submenu = sub
+        return root
     }
 
     /// "Remembered Groups" submenu: review and forget saved groups.
@@ -130,7 +226,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let entry = NSMenuItem(title: group.displayName, action: nil, keyEquivalent: "")
             let detail = NSMenu()
             for member in group.members {
-                let state = member.window == nil ? "closed" : (member.minimized ? "minimized" : "open")
+                let state = member.window == nil ? "closed"
+                    : member.minimized ? "minimized" : member.hidden ? "hidden" : "open"
                 let hint = member.signature.titleHint.map { " — \($0)" } ?? ""
                 let line = NSMenuItem(title: "\(member.signature.appName)\(hint) (\(state))", action: nil, keyEquivalent: "")
                 line.isEnabled = false
@@ -166,7 +263,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // MARK: - Actions
 
-    @objc private func openAccessibility() { Permissions.openSystemSettings() }
+    @objc private func openAccessibility() { Permissions.repair() }
     @objc private func openDesktopSettings() { SystemConflicts.openDesktopSettings() }
 
     @objc private func snapFromMenu(_ sender: NSMenuItem) {
@@ -193,12 +290,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func toggleDragTab() { Settings.dragToTab.toggle() }
     @objc private func toggleAutoTab() { Settings.autoTabRemembered.toggle() }
     @objc private func toggleLaunchAtLogin() { Settings.launchAtLogin.toggle() }
+    @objc private func toggleCloseMinimizes() { Settings.closeButtonMinimizesTabs.toggle() }
+    @objc private func toggleAutoTiling() { AutoTiler.shared.setEnabled(!Settings.autoTiling) }
+    @objc private func toggleAutoTabNew() { AutoTiler.shared.setAutoTab(!Settings.autoTabNewWindows) }
+    @objc private func toggleTiling() { WindowActions.toggleTiling() }
+    @objc private func floatAllWindows() { AutoTiler.shared.floatAll() }
+
+    @objc private func toggleAlwaysFloat(_ sender: NSMenuItem) {
+        guard let bundle = sender.representedObject as? String else { return }
+        AutoTiler.shared.toggleAlwaysFloat(bundleID: bundle)
+    }
 
     @objc private func about() {
         NSApp.activate()
         NSApp.orderFrontStandardAboutPanel(options: [
             .applicationName: "Paneful Desktop Manager",
-            .credits: NSAttributedString(string: "Snap windows side by side and group any apps into tabs that are remembered across restarts.\nOpen source under the MIT License."),
+            .credits: NSAttributedString(string: "Snap windows side by side, group any apps into tabs that are remembered across restarts, and auto-tile new windows.\nOpen source under the MIT License."),
         ])
     }
 }

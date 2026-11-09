@@ -2,7 +2,7 @@
 
 # Paneful Desktop Manager
 
-**Snap windows side by side and group windows from any app into tabs, on macOS.**
+**Snap windows side by side, group windows from any app into tabs, and auto-tile new windows, on macOS.**
 
 <p align="center">
   <a href="https://paneful.vercel.app"><b>Website</b></a> ·
@@ -18,7 +18,7 @@
   <img src="https://img.shields.io/badge/macOS-27.2%2B-black" alt="macOS 27.2+">
 </p>
 
-Paneful is a free, open-source menu-bar app for macOS. It brings two things macOS doesn't have:
+Paneful is a free, open-source menu-bar app for macOS. It brings things macOS doesn't have:
 
 - **Window snapping.** Drag a window to a screen edge (or press a shortcut) and it snaps to half, a quarter
   or full screen, with a live blurred preview of where it will land.
@@ -26,15 +26,26 @@ Paneful is a free, open-source menu-bar app for macOS. It brings two things macO
   one frame with a floating tab bar on top. Click a tab to switch, and move or resize the group as one window.
 - **Remembered groups.** Paneful remembers your tab groups across app restarts, reboots and its own
   relaunches. Quit Teams, reopen it, and its window tabs itself back into the group. New windows float.
+- **Auto-tiling (optional, off by default).** New windows take a tile: the window you were using moves to the
+  left half and new windows stack on the right. Closing one gives its space back. A tab group is one tile.
+- **Drop files onto tabs.** Hold a dragged file over a tab and that tab opens, so you can drop the file into
+  its window.
+- **Auto-tab new windows (optional, off by default).** New windows join the tab group of the window you were
+  using.
 
 The **[documentation](https://paneful.vercel.app/docs/)** has an animated demo for every feature.
-See [FEATURES.md](FEATURES.md) for the full and upcoming feature list (auto-tiling is next).
+See [FEATURES.md](FEATURES.md) for the full feature list.
 
 ## Download
 Get **[Paneful.dmg](https://github.com/HC-bentill/paneful/releases/latest/download/Paneful.dmg)** (latest release),
 open it and drag Paneful to Applications. If macOS says it can't verify the developer, open
 System Settings → Privacy & Security and click **Open Anyway**. Then allow Paneful under Accessibility.
 All versions are on the [Releases](https://github.com/HC-bentill/paneful/releases) page.
+
+**Updating?** Quit Paneful, replace it in Applications and open the new version. If macOS asks for
+Accessibility again, just switch Paneful on: Paneful removes the old version's entry itself, so there's no need
+to remove it with – or to relaunch. If it still doesn't start, choose **Grant Accessibility Access…** in the
+menu-bar menu.
 
 ## Requirements
 - macOS 27.2 or later
@@ -63,6 +74,9 @@ Run the unit tests with `swift test`.
 To see each of these in action, watch the animated demos in the [docs](https://paneful.vercel.app/docs/):
 [snapping](https://paneful.vercel.app/docs/#drag-to-snap), [tab groups](https://paneful.vercel.app/docs/#tab-groups),
 [reordering tabs](https://paneful.vercel.app/docs/#reorder-tabs), [remembered groups](https://paneful.vercel.app/docs/#remembered),
+[dropping files onto tabs](https://paneful.vercel.app/docs/#drop-on-tabs),
+[the close button](https://paneful.vercel.app/docs/#close-button), [auto-tab new windows](https://paneful.vercel.app/docs/#auto-tab-new),
+[auto-tiling](https://paneful.vercel.app/docs/#auto-tiling), [arranging tiles](https://paneful.vercel.app/docs/#arrange-tiles),
 [shortcuts](https://paneful.vercel.app/docs/#shortcuts) and
 [troubleshooting](https://paneful.vercel.app/docs/#troubleshooting).
 
@@ -82,11 +96,35 @@ To see each of these in action, watch the animated demos in the [docs](https://p
 | Make a group / add a tab | Drag a window onto the top of another window (its title bar or toolbar) or onto a tab bar. Hold it there until the preview says **Release to add as a tab**, then let go. Or press ⌃⌥T to tab the focused window with the previous one |
 | Switch tab | Click it, or ⌃⌥] / ⌃⌥[ |
 | Reorder tabs | Drag a tab sideways. The other tabs slide aside, and it stays where you let go (**Release to move the tab here**). The order is remembered |
-| Remove a tab | Hover and click ✕, drag the tab down out of the bar until it says **Release to pull out of the group**, right-click → Move Out of Group, or ⌃⌥W |
-| Close a tab's window | Right-click → Close Window (the group still remembers it) |
+| Remove a tab | Drag the tab down out of the bar until it says **Release to pull out of the group**, right-click → Move Out of Group, or ⌃⌥W |
+| Tab's ✕ | Hover a tab and click ✕: its window goes to the Dock and the next tab takes its place. Click it in the Dock to bring it back as the active tab (right-click → Minimize Window does the same) |
+| Red close button | Sends a tabbed window to the Dock instead of closing it, and the next tab takes its place. Click it in the Dock to bring it back as the active tab. ⌥-click the button to really close the window. Switch this off with **Close Button Minimizes Tabs** in the menu. Apps that only hide their window when closed (Postman, Teams, Slack) step aside the same way |
+| Tab every new window automatically | Menu bar → **Auto-tab New Windows** (off by default). A new window joins the tab group of the window you were using, or starts one with it |
+| Close a tab's window | ⌥-click its red button, or right-click its tab → Close Window (the group still remembers it) |
+| Drop a file into a tab | Drag a file, folder, text or image onto a tab and hold it there (**Hold to open this tab**). The tab opens (**Now drop it onto the window**); drop it into the window below |
 | Ungroup | Right-click a tab → Ungroup All, or the menu-bar menu |
-| Minimize a tab | It leaves the group while minimized and comes back as the active tab when restored |
+| Minimize a tab | Its ✕, its red button, or ⌘M. It steps out of the bar while minimized and comes back as the active tab when restored |
 | Minimize the whole group | ⌃⌥M, menu bar → Minimize Group, or right-click a tab → Minimize Group. Restoring any of its windows from the Dock brings the whole group back |
+
+### Auto-tiling
+Off by default. Turn it on in the menu bar: **Auto-tile New Windows**.
+
+| Action | How |
+|---|---|
+| Open a new window | The window you were using moves to the left half and the new one takes the right half. More new windows stack top to bottom on the right. While an app launches, a dark placeholder with its icon holds the slot |
+| Close or minimize a tiled window | The others take its space; the last one fills the screen. A minimized window comes back to the same slot |
+| Swap two tiles | Drag a tiled window onto another tile and let go |
+| Move a tile to another display | Drag it there; it joins that display's layout |
+| Resize tiles | Drag the edge between two tiles |
+| Float or tile the focused window | ⌃⌥F, or menu bar → Auto-tiling |
+| Never tile an app | Menu bar → Auto-tiling → **Always Float** *app* (for the app in front) |
+| Stop arranging the current windows | Menu bar → Auto-tiling → **Float All Windows** (new windows are still tiled) |
+
+- A tab group is one tile; its tab bar spans the tile.
+- Windows that were open before you turned auto-tiling on stay where they are.
+- Dialogs, sheets, full-screen windows and windows that can't be resized always float. So does a window you snap
+  to an edge or with a shortcut.
+- Each display has its own layout, and each Space shows only its own windows.
 
 ### Remembered groups
 - Groups are saved in `~/Library/Application Support/Paneful/groups.json`.
@@ -97,8 +135,8 @@ To see each of these in action, watch the animated demos in the [docs](https://p
 - Menu bar → **Remembered Groups** lists saved groups, so you can forget one or all of them. Switch auto-tabbing
   off with **Auto-tab Remembered Windows**.
 
-Everything is also in the menu-bar icon, where you can switch off drag-to-snap and drag-to-tab, and turn on
-Launch at Login. If macOS's own edge tiling or Stage Manager is on, the menu warns you, because both fight
+Everything is also in the menu-bar icon, where you can switch off drag-to-snap, drag-to-tab and the
+close-button behaviour, turn on auto-tiling, and turn on Launch at Login. If macOS's own edge tiling or Stage Manager is on, the menu warns you, because both fight
 Paneful, and links to the setting that turns them off.
 
 ## How it works
@@ -109,6 +147,12 @@ Paneful, and links to the setting that turns them off.
   repositions.
 - **Remembered groups** are stored as JSON. Paneful watches the apps that have closed group members, and when
   one opens a new window that matches, it tabs that window back in.
+- **Auto-tiling** compares the window server's window list with every window seen before to spot new windows,
+  and keeps a main-and-stack layout per display.
+- **An event tap** sees clicks on a tabbed window's red close button and minimizes the window instead.
+- **The tab bar is a drag destination**, so holding a dragged file over a tab opens it (spring-loading).
+- **Sleep, lock and display changes** pause Paneful's window checks until the screens have settled, so groups
+  don't drift.
 - **Carbon `RegisterEventHotKey`** handles the global shortcuts.
 
 ```
@@ -116,9 +160,10 @@ Sources/Paneful/
 ├── App/            AppDelegate, menu-bar menu
 ├── Accessibility/  AXWindow wrapper, window queries, permissions
 ├── Snapping/       snap zones, drag controller, preview panel, window actions
-├── Tabs/           tab-group manager, floating tab bar, remembered-group store
+├── Tabs/           tab-group manager, floating tab bar, remembered-group store, close-button interceptor
+├── Tiling/         auto-tiler, layout math, placeholder tiles
 ├── Hotkeys/        global shortcuts
-└── Support/        coordinate conversion, settings, macOS conflict checks
+└── Support/        coordinate conversion, settings, sleep/lock state, macOS conflict checks
 Tests/PanefulTests/ unit tests (swift test)
 ```
 
@@ -130,7 +175,7 @@ Tests/PanefulTests/ unit tests (swift test)
 - Not on the Mac App Store: window managers can't run inside the App Store sandbox.
 
 ## Contributing
-Contributions are very welcome, from your first PR to a whole feature like auto-tiling.
+Contributions are very welcome, from your first PR to a whole new feature.
 
 - Read **[CONTRIBUTING.md](CONTRIBUTING.md)** for setup, the code tour and how to test window behaviour.
 - Pick an issue labelled **[good first issue](https://github.com/HC-bentill/paneful/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)**

@@ -30,6 +30,19 @@ enum WindowQuery {
         return info.compactMap(screenWindow(from:))
     }
 
+    /// IDs of every normal (layer 0) window, on any Space, minimized or not.
+    static func allWindowIDs() -> Set<CGWindowID> {
+        guard let info = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements],
+                                                    kCGNullWindowID) as? [[String: Any]] else { return [] }
+        var ids = Set<CGWindowID>()
+        for entry in info {
+            guard let number = entry[kCGWindowNumber as String] as? NSNumber,
+                  (entry[kCGWindowLayer as String] as? NSNumber)?.intValue ?? 0 == 0 else { continue }
+            ids.insert(number.uint32Value)
+        }
+        return ids
+    }
+
     /// Current bounds of one window, or nil when it's gone or not on screen.
     static func bounds(of id: CGWindowID) -> CGRect? {
         guard let info = CGWindowListCopyWindowInfo([.optionIncludingWindow], id) as? [[String: Any]],

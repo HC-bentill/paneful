@@ -71,10 +71,28 @@ struct AXWindow: Hashable {
         return AXValueGetValue(raw as! AXValue, .cgSize, &size) ? size : nil
     }
 
-    /// Frame in AX coordinates. `nil` when the window no longer exists.
+    /// Frame in AX coordinates. `nil` when the window no longer exists, or can't be read right now (a hung
+    /// app, or any app while the screen is locked).
     var frame: CGRect? {
         guard let p = position, let s = size else { return nil }
         return CGRect(origin: p, size: s)
+    }
+
+    /// True only when the window has really closed. A slow or hung app, or the locked screen, makes reads
+    /// fail with other errors; those don't count, so a window isn't dropped from its group while the Mac
+    /// sleeps.
+    var isGone: Bool {
+        var value: CFTypeRef?
+        return AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &value) == .invalidUIElement
+    }
+
+    /// Whether the window's size can be changed (fixed-size windows such as Calculator can't be tiled).
+    var isResizable: Bool {
+        var settable: DarwinBoolean = false
+        guard AXUIElementIsAttributeSettable(element, kAXSizeAttribute as CFString, &settable) == .success else {
+            return false
+        }
+        return settable.boolValue
     }
 
     // MARK: - Changing the window

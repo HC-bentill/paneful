@@ -5,7 +5,19 @@ Repo: https://github.com/HC-bentill/paneful (public). Bundle ID: io.github.hc-be
 CI: .github/workflows/build.yml runs `swift test` and builds the app bundle on every push and PR.
 agentmemory project id: `macos-window-tabs-tiler`. Recall it for the full history (video analyses, decisions).
 
-## Status (2026-11-06)
+## Status (2026-11-09, release 0.3.0 prepared)
+- Resources/Info.plist is 0.3.0. Local `make-dmg.sh` build verified (ad-hoc, arm64, build 15). Everything is
+  UNCOMMITTED in both repos: Henry commits, tags v0.3.0 and pushes himself. He chose self-signed release signing:
+  build/signing/Paneful-Self-Signed.p12 + .password were created 2026-11-09 (SHA-1 3B:EF:31:E2:…:80:BD, git-ignored).
+  Henry must back them up and add the secrets SELF_SIGNED_P12 / SELF_SIGNED_P12_PASSWORD BEFORE pushing the tag.
+- Henry's round-3 list (2026-11-09), all built, compile with 0 warnings, 20 tests pass, NOT hand-tested yet:
+  stale Accessibility grant after updating (Permissions.clearStaleGrantIfUpdated + optional self-signed release
+  cert), tab reorder couldn't reach first/last slot (TabReorder.targetSlot now edge-based), groups shrinking by
+  32pt after every sleep (SystemState pause + AXWindow.isGone + form() no double bar), red close button on a
+  tabbed window minimizes instead (CloseButtonInterceptor), drag files onto tabs (spring-loaded TabStripHostingView),
+  auto-tiling (Tiling/, feature 3, default OFF). Landing docs updated (not pushed). Henry pushes himself.
+
+## Earlier status (2026-11-06)
 - Features 1, 2 and 4 are built, including refinements adopted from the Trellis WM docs (see FEATURES.md).
   They compile with no errors or warnings (debug + release), and `swift test` passes (7 pure-logic tests).
 - NOTHING HAS BEEN TESTED BY HAND YET. Next: open build/Paneful.app, grant Accessibility, run the manual checklist,
@@ -46,10 +58,26 @@ Privacy & Security → Accessibility after every rebuild.
   https://github.com/HC-bentill/paneful/releases/latest/download/Paneful.dmg (constants in src/components/shared.jsx).
   When a feature ships, add its demo there too (see that repo's README), and link it from README.md here.
 - macOS 27 is Apple-silicon only, so arm64-only builds are fine.
+- Free alternative to Developer ID for keeping the Accessibility grant across updates: `scripts/make-signing-cert.sh`
+  makes a self-signed "Paneful Self-Signed" code-signing cert (build/signing/, git-ignored; back it up, never
+  regenerate). make-dmg.sh prefers Developer ID, then that identity (looked up WITHOUT -v: untrusted certs aren't
+  "valid" but codesign signs with them), then ad-hoc. release.yml imports it from secrets SELF_SIGNED_P12 /
+  SELF_SIGNED_P12_PASSWORD. Designated requirement becomes `identifier … and certificate leaf = H"…"` (stable).
+  Verified locally with a throwaway keychain (PANEFUL_KEYCHAIN). Henry hasn't created the real cert yet.
 
 ## Architecture (Sources/Paneful)
 - `App/AppDelegate.swift`: status-bar menu (rebuilt in menuNeedsUpdate), permission polling, 0.35s tick
-  timer → FocusTracker.update() + TabGroupManager.refresh().
+  timer → FocusTracker.update() + TabGroupManager.refresh() + AutoTiler.shared.update().
+- `Accessibility/Permissions.swift`: records the trusted build (cdhash + bundle path in UserDefaults). Untrusted at
+  launch with the same path but a new signature (or no record yet) → `tccutil reset Accessibility <bundle id>`
+  (works without root) then prompt, so after an update the user only flips the switch. Menu "Grant Accessibility
+  Access…" = Permissions.repair(). Never auto-resets for a different copy (dev build vs /Applications), since
+  both share the bundle ID and would undo each other.
+- `Support/SystemState.swift`: isFrozen while asleep / displays off / locked / fast-user-switched (touch nothing);
+  isSettling for 2s after wake, 1s after unlock, 1.5s after display changes (refresh() only runs
+  placeBars(hideMissing: false); AX moves are followed only while the mouse is down). onWake (0.25s after
+  unfreezing) and onResume (settled) both → TabGroupManager.restoreGroupFrames(). While locked, AX reads fail: never treat `frame == nil` as closed; use `AXWindow.isGone`
+  (kAXErrorInvalidUIElement only).
 - `Accessibility/AXWindow.swift`: struct wrapping AXUIElement (frame get/set in AX coords, focus()). setFrame turns
   AXEnhancedUserInterface off while it sets the frame (Chromium/Electron otherwise animate or drop changes).
   `windowID` = CGWindowID via the private `_AXUIElementGetWindow`.
@@ -82,9 +110,36 @@ Privacy & Security → Accessibility after every rebuild.
   PreferenceKey; on release it glides into the slot, then actions.move → TabGroupManager.moveTab, which
   reorders `members` with Array.movingLive so closed members keep their place). |dy| > 44pt = pull out
   (tearOff). `TabDragHint.swift` shows the pill under the bar. Pure math is in `TabReorder.swift` (tested).
-  If Paneful starts while the screen is locked, the restore scan waits for com.apple.screenIsUnlocked (AX
-  can't read or move windows while locked).
-- `Hotkeys/HotKeyManager.swift`: Carbon RegisterEventHotKey, all ⌃⌥ (arrows, ↩, C, U/I/J/K, S, T, W, M, [ ]).
+  If Paneful starts while the screen is locked, the restore scan waits for SystemState's resume (AX can't read
+  or move windows while locked). form() keeps contentFrame when the anchor is already at it, so re-forming never
+  shrinks a window by the bar height again (that was the "shrinks after sleep" bug).
+  Tab strip host = `TabStripHostingView` (first mouse + NSDraggingDestination): a file/text/image drag held
+  0.5s over a tab selects it (spring-loading); model.tabFrames (unpublished) maps x → tab; pills .dropHold /
+  .dropOpened in TabDragHint. It never accepts the drop (performDragOperation returns false).
+  `CloseButtonInterceptor.swift`: CGEventTap (session, head, default) on left down/up. Targets are computed on the
+  tick (TabGroupManager.refresh → updateTargets): each visible group's active window's kAXCloseButtonAttribute
+  frame, cached as an offset from the window origin (refreshed every 3s) + group.contentFrame.origin. The click
+  check is pure geometry. DON'T use AXUIElementCopyElementAtPosition here: Electron apps (VS Code, Postman)
+  return web content under the traffic lights, so the click went through. Hit → swallow down+up,
+  setMinimized(true). ⌥-click passes through. Setting closeButtonMinimizesTabs (default on).
+  Member.hidden: apps that hide-on-close (Postman, Teams, Slack) leave the window alive but off screen.
+  checkHiddenWindows() marks a member hidden when its window is off screen ≥0.6s while a groupmate is showing
+  (not ⌘H-hidden, not minimized, not during a Space switch) → like a minimized tab; unhidden when it shows again.
+  Auto-tab new windows (Settings.autoTabNewWindows, default off) lives in AutoTiler's new-window pipeline:
+  tabIntoRecent() → addToGroup(target: most recent visible window, window: new). Runs before tiling.
+  AppDelegate.resolveOtherCopies(): only one Paneful copy (same bundle ID) runs; offers to quit the other.
+  GroupStore.load() copies a non-empty groups.json to groups.backup.json.
+- `Tiling/`: `AutoTiler.swift` (Settings.autoTiling, default OFF). Per-display `ScreenLayout` (keyed by
+  CGDirectDisplayID) of `Tile`s: .window(AXWindow) / .group(UUID) / .pending(pid). Main + stack layout, math in
+  `TileLayout.swift` (tested). New windows = CGWindowList on-screen IDs not in `seen` (baseline with .optionAll on
+  enable, Space switch and resume). First new window in an empty layout seeds it with FocusTracker.recent(). Tiles
+  are `parked` (no space, keep slot) when their window isn't on screen (minimized/hidden/other Space). App launch →
+  `.pending` tile + `TilePlaceholders` panel until the window arrives (6s timeout). DragController.mouseUp calls
+  AutoTiler.release (snap), windowDropped (swap / other display / slide back) and noteMouseUp (user resize
+  detection = a settled tile changed size within 1.5s of a mouse-up; compares with the last *placed* frame).
+  Placement backs off 8s per (tile, frame) for apps that refuse a size. Layout isn't persisted.
+- `Hotkeys/HotKeyManager.swift`: Carbon RegisterEventHotKey, all ⌃⌥ (arrows, ↩, C, U/I/J/K, S, T, W, M, F, [ ]).
+  ⌃⌥F = float/tile the focused window (auto-tiling).
   ⌃⌥M = Minimize Group: TabGroupManager.minimize() sets group.collapsed and marks members minimized before
   the AX calls; restoring any member → restoreGroup() un-minimizes the rest.
 - `Support/Geometry.swift`: AX (top-left origin) ↔ Cocoa (bottom-left origin). `Settings.swift`: UserDefaults
@@ -112,10 +167,12 @@ Privacy & Security → Accessibility after every rebuild.
 ## Features (see FEATURES.md for full spec)
 1. Side-by-side snapping: built
 2. Cross-app tab groups: built
-3. Auto-tiling (from video 2): planned, NEXT. Optional mode, OFF by default. Refinements are in FEATURES.md.
+3. Auto-tiling (from video 2): built 2026-11-09, OFF by default, awaiting manual test.
 4. Remembered tab groups + floating new windows: built. Detection polls on the 0.35s tick, not
    kAXWindowCreatedNotification. That's simpler and handles windows that appear before an observer could be
    attached.
+5. Drop files onto tabs (spring-loaded tabs): built 2026-11-09.
+6. Close button minimizes tabs: built 2026-11-09.
 Henry is recording more videos and will add features. Append each one to FEATURES.md and agentmemory.
 
 ## Conventions

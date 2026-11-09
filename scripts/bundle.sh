@@ -7,6 +7,7 @@
 #                          the keychain, else ad-hoc. A real identity keeps the Accessibility grant valid across
 #                          rebuilds; an ad-hoc signature changes every build, so macOS forgets the grant.
 #                          "Developer ID Application: …" identities also get a secure timestamp (for notarizing).
+#   PANEFUL_KEYCHAIN       Keychain to find that identity in (CI imports certificates into a temporary keychain).
 #   PANEFUL_APP_DIR        Where to put Paneful.app (default: build). make-dmg.sh uses build/release so a
 #                          release build never replaces the app you're testing.
 #   PANEFUL_VERSION        Stamps CFBundleShortVersionString (and CFBundleVersion = git commit count).
@@ -52,6 +53,7 @@ if [ -z "$IDENTITY" ] || [ "$IDENTITY" = "-" ]; then
 else
   EXTRA=()
   case "$IDENTITY" in "Developer ID Application:"*) EXTRA=(--timestamp) ;; esac
+  if [ -n "${PANEFUL_KEYCHAIN:-}" ]; then EXTRA+=(--keychain "$PANEFUL_KEYCHAIN"); fi
   codesign --force --deep --options runtime ${EXTRA[@]+"${EXTRA[@]}"} --sign "$IDENTITY" "$APP"
   echo "Signed with: $IDENTITY"
 fi
