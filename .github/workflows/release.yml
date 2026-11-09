@@ -19,9 +19,13 @@ name: Release
 # That keeps the Accessibility permission across updates. With neither, the build is ad-hoc signed and users
 # switch Paneful on again after each update. Either way users confirm the first launch in System Settings.
 
+# To check signing on GitHub's runner without publishing anything, run it by hand (Actions → Release → Run
+# workflow, or `gh workflow run release.yml --ref main`): it builds and checks the DMG and keeps it as a run
+# artifact, but only a pushed tag creates a release.
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -80,17 +84,61 @@ jobs:
           security import "$RUNNER_TEMP/self-signed.p12" -k "$KEYCHAIN" -P "$P12_PASSWORD" -T /usr/bin/codesign
           rm "$RUNNER_TEMP/self-signed.p12"
           security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
-          echo "PANEFUL_SIGN_IDENTITY=Paneful Self-Signed" >> "$GITHUB_ENV"
+          # codesign only looks in keychains on the user's search list, even with --keychain.
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          # Trust the certificate for code signing, so codesign treats it as a valid identity (macOS can skip an
+          # untrusted one). Best effort: signing by hash below may work without it.
+          security find-certificate -c "Paneful Self-Signed" -p "$KEYCHAIN" > "$RUNNER_TEMP/self-signed.pem"
+          sudo security authorizationdb write com.apple.trust-settings.admin allow \
+            && sudo security add-trusted-cert -d -r trustRoot -p codeSign \
+                 -k /Library/Keychains/System.keychain "$RUNNER_TEMP/self-signed.pem" \
+            || echo "::warning::Could not mark the self-signed certificate as trusted for code signing"
+          echo "Identities in the signing keychain:"
+          security find-identity -p codesigning "$KEYCHAIN"
+          # Sign by the certificate's SHA-1 hash: unambiguous, and found even when it isn't "valid".
+          HASH="$(security find-identity -p codesigning "$KEYCHAIN" | awk '/"Paneful Self-Signed"/ { print $2; exit }')"
+          if [ -z "$HASH" ]; then
+            echo "::error::The Paneful Self-Signed identity isn't in the keychain (check the SELF_SIGNED_P12 secrets)"
+            exit 1
+          fi
+          echo "Signing identity: $HASH"
+          echo "PANEFUL_SIGN_IDENTITY=$HASH" >> "$GITHUB_ENV"
           echo "PANEFUL_KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
 
       - name: Build DMG
-        run: ./scripts/make-dmg.sh "${GITHUB_REF_NAME#v}"
+        run: |
+          # A tag names the version; a manual run uses the one in Info.plist.
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then VERSION="${GITHUB_REF_NAME#v}"
+          else VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Resources/Info.plist)"; fi
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          ./scripts/make-dmg.sh "$VERSION"
+
+      - name: Check the signature
+        run: |
+          APP=build/release/Paneful.app
+          codesign --verify --strict --verbose=2 "$APP"
+          REQUIREMENT="$(codesign -dr - "$APP" 2>&1 | grep 'designated =>' || true)"
+          echo "$REQUIREMENT"
+          # With a certificate configured, an ad-hoc build (identity = cdhash) must never be published: users
+          # would lose the Accessibility permission on every update again.
+          if [ "$HAS_DEVELOPER_ID" = "true" ] || [ "$HAS_SELF_SIGNED" = "true" ]; then
+            case "$REQUIREMENT" in
+              *cdhash*) echo "::error::Signed ad-hoc although a signing certificate is configured"; exit 1 ;;
+            esac
+          fi
+
+      - name: Keep the DMG (manual runs)
+        if: github.ref_type != 'tag'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Paneful-${{ env.VERSION }}-dmg
+          path: build/Paneful-${{ env.VERSION }}.dmg
 
       - name: Publish GitHub release
+        if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
           {
             echo "## Install"
             echo "1. Download **Paneful.dmg**, open it and drag **Paneful** onto **Applications**."

@@ -63,7 +63,12 @@ Privacy & Security → Accessibility after every rebuild.
   regenerate). make-dmg.sh prefers Developer ID, then that identity (looked up WITHOUT -v: untrusted certs aren't
   "valid" but codesign signs with them), then ad-hoc. release.yml imports it from secrets SELF_SIGNED_P12 /
   SELF_SIGNED_P12_PASSWORD. Designated requirement becomes `identifier … and certificate leaf = H"…"` (stable).
-  Verified locally with a throwaway keychain (PANEFUL_KEYCHAIN). Henry hasn't created the real cert yet.
+  Verified locally with a throwaway keychain (PANEFUL_KEYCHAIN). Real cert: build/signing (SHA-1 3BEF31E2…80BD).
+  CI gotcha (v0.3.0 run 42644109309 on macos-26-arm64): "Paneful Self-Signed: no identity found" although the import
+  said "1 identity imported" (worked locally on 27.2). release.yml now adds the keychain to the user search list,
+  best-effort trusts the cert (sudo add-trusted-cert, codeSign), signs by SHA-1 hash, and a "Check the signature"
+  step fails the run if a cert is configured but the app came out ad-hoc (cdhash). workflow_dispatch = dry run
+  (builds + checks, uploads the DMG as an artifact, publishes nothing); only tags publish.
 
 ## Architecture (Sources/Paneful)
 - `App/AppDelegate.swift`: status-bar menu (rebuilt in menuNeedsUpdate), permission polling, 0.35s tick
