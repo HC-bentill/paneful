@@ -149,6 +149,11 @@ struct AXWindow: Hashable {
         NSRunningApplication(processIdentifier: pid)?.activate()
     }
 
+    /// Brings the window in front of the others without activating its app.
+    func raise() {
+        AXUIElementPerformAction(element, kAXRaiseAction as CFString)
+    }
+
     /// Minimizes the window into the Dock, or restores it.
     func setMinimized(_ minimized: Bool) {
         AXUIElementSetAttributeValue(element, kAXMinimizedAttribute as CFString,

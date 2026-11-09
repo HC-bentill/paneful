@@ -197,3 +197,81 @@ struct TileLayoutTests {
         #expect(TileLayout.index(of: CGPoint(x: 700, y: 10), in: frames) == nil)
     }
 }
+
+@Suite("Saved layouts")
+struct SavedLayoutTests {
+    typealias W = LayoutMatcher.Window
+
+    @Test func sameTitleWinsOverPosition() {
+        let saved = [W(bundleID: "com.apple.finder", title: "Downloads", frame: CGRect(x: 0, y: 0, width: 500, height: 400)),
+                     W(bundleID: "com.apple.finder", title: "Documents", frame: CGRect(x: 600, y: 0, width: 500, height: 400))]
+        // Each open window sits where the *other* one was saved.
+        let open = [W(bundleID: "com.apple.finder", title: "Documents", frame: CGRect(x: 0, y: 0, width: 500, height: 400)),
+                    W(bundleID: "com.apple.finder", title: "downloads", frame: CGRect(x: 600, y: 0, width: 500, height: 400))]
+        #expect(LayoutMatcher.match(saved: saved, open: open) == [1, 0])
+    }
+
+    @Test func similarTitleThenNearestWindow() {
+        let saved = [W(bundleID: "com.apple.TextEdit", title: "Notes.txt", frame: nil),
+                     W(bundleID: "com.brave.Browser", title: "GitHub", frame: CGRect(x: 800, y: 40, width: 600, height: 800))]
+        let open = [W(bundleID: "com.brave.Browser", title: "Inbox", frame: CGRect(x: 0, y: 40, width: 600, height: 800)),
+                    W(bundleID: "com.apple.TextEdit", title: "Notes.txt — Edited", frame: nil),
+                    W(bundleID: "com.brave.Browser", title: "Hacker News", frame: CGRect(x: 790, y: 50, width: 600, height: 800))]
+        #expect(LayoutMatcher.match(saved: saved, open: open) == [1, 2])
+    }
+
+    @Test func onlySameAppAndEachWindowOnce() {
+        let saved = [W(bundleID: "a", title: "One", frame: nil), W(bundleID: "a", title: "Two", frame: nil),
+                     W(bundleID: "b", title: "One", frame: nil)]
+        let open = [W(bundleID: "a", title: "One", frame: nil)]
+        #expect(LayoutMatcher.match(saved: saved, open: open) == [0, nil, nil])
+    }
+
+    @Test func sameDisplayKeepsTheFrameExactly() {
+        let screen = CGRect(x: 0, y: 25, width: 1512, height: 919)
+        let frame = CGRect(x: -20, y: 25, width: 800, height: 950)   // partly off screen on purpose
+        #expect(LayoutGeometry.place(frame, savedScreen: screen, screens: [screen]) == frame)
+    }
+
+    @Test func otherDisplaySizeKeepsTheRelativePlace() {
+        let big = CGRect(x: 0, y: 25, width: 2560, height: 1390)
+        let laptop = CGRect(x: 0, y: 25, width: 1512, height: 919)
+        let rightHalf = CGRect(x: 1280, y: 25, width: 1280, height: 1390)
+        #expect(LayoutGeometry.place(rightHalf, savedScreen: big, screens: [laptop])
+                == CGRect(x: 756, y: 25, width: 756, height: 919))
+    }
+
+    @Test func missingDisplayFallsBackToTheFirstOne() {
+        let main = CGRect(x: 0, y: 25, width: 1512, height: 919)
+        let gone = CGRect(x: 1512, y: 0, width: 1920, height: 1055)
+        let placed = LayoutGeometry.place(CGRect(x: 1600, y: 100, width: 900, height: 700), savedScreen: gone, screens: [main])
+        #expect(main.contains(placed))
+    }
+
+    @Test func clampKeepsTheFrameOnScreen() {
+        let screen = CGRect(x: 0, y: 25, width: 1000, height: 800)
+        #expect(LayoutGeometry.clamp(CGRect(x: 900, y: -50, width: 300, height: 2000), to: screen)
+                == CGRect(x: 700, y: 25, width: 300, height: 800))
+    }
+
+    @Test func summaryListsAppsFrontMostFirst() {
+        func item(_ apps: String...) -> SavedLayout.Item {
+            .init(windows: apps.map { .init(bundleID: $0, appName: $0, title: nil) }, frame: .zero, screen: .zero)
+        }
+        let layout = SavedLayout(number: 1, savedAt: Date(), items: [item("Safari", "Notes"), item("Safari"), item("Xcode"), item("Mail"), item("Music")])
+        #expect(layout.summary == "Safari, Notes, Xcode +2")
+        #expect(layout.windowCount == 6)
+    }
+
+    @Test func layoutsSurviveARoundTrip() throws {
+        let layout = SavedLayout(number: 3, savedAt: Date(timeIntervalSince1970: 1_800_000_000),
+                                 items: [.init(windows: [.init(bundleID: "a", appName: "A", title: "T")],
+                                               frame: CGRect(x: 1, y: 2, width: 3, height: 4),
+                                               screen: CGRect(x: 0, y: 25, width: 10, height: 10), activeTab: 0)])
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        #expect(try decoder.decode(SavedLayout.self, from: encoder.encode(layout)) == layout)
+    }
+}

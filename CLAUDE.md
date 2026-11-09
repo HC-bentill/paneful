@@ -16,6 +16,10 @@ agentmemory project id: `macos-window-tabs-tiler`. Recall it for the full histor
   32pt after every sleep (SystemState pause + AXWindow.isGone + form() no double bar), red close button on a
   tabbed window minimizes instead (CloseButtonInterceptor), drag files onto tabs (spring-loaded TabStripHostingView),
   auto-tiling (Tiling/, feature 3, default OFF). Landing docs updated (not pushed). Henry pushes himself.
+- Release CI fixed and verified: dry run 42676902485 (workflow_dispatch) signed with the self-signed cert,
+  designated requirement `certificate leaf = H"3bef31e2…"`. The v0.3.0 tag on origin still points at a681552
+  (failed run, no release published), so it must be moved to the final commit before releasing.
+- Saved layouts (feature 8) added 2026-11-09 for 0.3.0: builds with 0 new warnings, 29 tests pass, NOT hand-tested.
 
 ## Earlier status (2026-11-06)
 - Features 1, 2 and 4 are built, including refinements adopted from the Trellis WM docs (see FEATURES.md).
@@ -143,7 +147,19 @@ Privacy & Security → Accessibility after every rebuild.
   AutoTiler.release (snap), windowDropped (swap / other display / slide back) and noteMouseUp (user resize
   detection = a settled tile changed size within 1.5s of a mouse-up; compares with the last *placed* frame).
   Placement backs off 8s per (tile, frame) for apps that refuse a size. Layout isn't persisted.
-- `Hotkeys/HotKeyManager.swift`: Carbon RegisterEventHotKey, all ⌃⌥ (arrows, ↩, C, U/I/J/K, S, T, W, M, F, [ ]).
+- `Layouts/`: saved layouts (feature 8). `SavedLayouts.swift` = capture (CGWindowList front to back → AX window
+  by windowID; a formed group is one item: live tabs, contentFrame, active tab) and restore (pair open windows of
+  the layout's apps with `LayoutMatcher`, unhide apps, detach singles from formed groups (or any group when
+  minimized, else un-minimizing would rejoin it), `TabGroupManager.arrange` for groups, un-minimize, FrameKeeper
+  for singles, then after 0.6s if anything animated in: AXRaise back to front + focus/activate the front one).
+  AutoTiler.floatAll() first when tiling is on. `LayoutMath.swift` = SavedLayout model + LayoutMatcher +
+  LayoutGeometry (pure, tested). `LayoutStore.swift` = layouts.json (ISO-8601 dates). `Support/Toast.swift` = the
+  confirmation pop-up (HUD panel, lower part of the mouse's screen, 1.8s).
+  `TabGroupManager.arrange(windows, contentFrame:, active:, claimedElsewhere:)` reuses the group most of the
+  windows belong to; joins first, then detaches members claimed by other layout items (so the group never drops
+  below 2 members mid-way; later items can't pick a group an earlier item already shaped).
+- `Hotkeys/HotKeyManager.swift`: Carbon RegisterEventHotKey, all ⌃⌥ (arrows, ↩, C, U/I/J/K, S, T, W, M, F, [ ]),
+  plus ⌃⌥1…9 (restore layout) and ⌃⌥⇧1…9 (save layout).
   ⌃⌥F = float/tile the focused window (auto-tiling).
   ⌃⌥M = Minimize Group: TabGroupManager.minimize() sets group.collapsed and marks members minimized before
   the AX calls; restoring any member → restoreGroup() un-minimizes the rest.
@@ -178,6 +194,8 @@ Privacy & Security → Accessibility after every rebuild.
    attached.
 5. Drop files onto tabs (spring-loaded tabs): built 2026-11-09.
 6. Close button minimizes tabs: built 2026-11-09.
+7. Auto-tab new windows: built 2026-11-09 (default off).
+8. Saved layouts (⌃⌥⇧1…9 save, ⌃⌥1…9 restore): built 2026-11-09.
 Henry is recording more videos and will add features. Append each one to FEATURES.md and agentmemory.
 
 ## Conventions

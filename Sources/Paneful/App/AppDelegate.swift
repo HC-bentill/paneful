@@ -142,6 +142,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(snapRoot)
 
         menu.addItem(item("Side by Side with Previous Window\t⌃⌥S", #selector(sideBySide)))
+        menu.addItem(savedLayoutsItem())
         menu.addItem(.separator())
         menu.addItem(item("Tab with Previous Window\t⌃⌥T", #selector(tabWithPrevious)))
         menu.addItem(item("Next Tab\t⌃⌥]", #selector(nextTab)))
@@ -207,6 +208,53 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         floatAll.toolTip = "Stop arranging the current windows and leave them where they are. New windows are still tiled."
         sub.addItem(floatAll)
 
+        root.submenu = sub
+        return root
+    }
+
+    /// "Saved Layouts" submenu: restore (⌃⌥1…9), save (⌃⌥⇧1…9) and forget numbered layouts.
+    private func savedLayoutsItem() -> NSMenuItem {
+        let root = NSMenuItem(title: "Saved Layouts", action: nil, keyEquivalent: "")
+        let sub = NSMenu()
+        let layouts = SavedLayouts.shared.all
+        if layouts.isEmpty {
+            for line in ["No saved layouts yet", "Arrange your windows, then press ⌃⌥⇧1…9"] {
+                let info = NSMenuItem(title: line, action: nil, keyEquivalent: "")
+                info.isEnabled = false
+                sub.addItem(info)
+            }
+        }
+        for layout in layouts {
+            let restore = item("Layout \(layout.number): \(layout.summary)\t⌃⌥\(layout.number)", #selector(restoreLayout(_:)))
+            restore.representedObject = layout.number
+            let windows = layout.windowCount == 1 ? "1 window" : "\(layout.windowCount) windows"
+            restore.toolTip = "\(windows), saved \(layout.savedAt.formatted(date: .abbreviated, time: .shortened))"
+            sub.addItem(restore)
+        }
+        sub.addItem(.separator())
+
+        let saveMenu = NSMenu()
+        for number in SavedLayouts.numbers {
+            let title = SavedLayouts.shared.layout(number).map { "\(number) (replaces \($0.summary))" } ?? "\(number)"
+            let save = item("\(title)\t⌃⌥⇧\(number)", #selector(saveLayout(_:)))
+            save.representedObject = number
+            saveMenu.addItem(save)
+        }
+        let saveRoot = NSMenuItem(title: "Save Current Layout As", action: nil, keyEquivalent: "")
+        saveRoot.submenu = saveMenu
+        sub.addItem(saveRoot)
+
+        if !layouts.isEmpty {
+            let forgetMenu = NSMenu()
+            for layout in layouts {
+                let forget = item("Layout \(layout.number): \(layout.summary)", #selector(forgetLayout(_:)))
+                forget.representedObject = layout.number
+                forgetMenu.addItem(forget)
+            }
+            let forgetRoot = NSMenuItem(title: "Forget Layout", action: nil, keyEquivalent: "")
+            forgetRoot.submenu = forgetMenu
+            sub.addItem(forgetRoot)
+        }
         root.submenu = sub
         return root
     }
@@ -286,6 +334,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func forgetAllGroups() { TabGroupManager.shared.forgetAll() }
 
+    @objc private func restoreLayout(_ sender: NSMenuItem) {
+        guard let number = sender.representedObject as? Int else { return }
+        SavedLayouts.shared.restore(number)
+    }
+
+    @objc private func saveLayout(_ sender: NSMenuItem) {
+        guard let number = sender.representedObject as? Int else { return }
+        SavedLayouts.shared.save(number)
+    }
+
+    @objc private func forgetLayout(_ sender: NSMenuItem) {
+        guard let number = sender.representedObject as? Int else { return }
+        SavedLayouts.shared.forget(number)
+    }
+
     @objc private func toggleDragSnap() { Settings.dragToSnap.toggle() }
     @objc private func toggleDragTab() { Settings.dragToTab.toggle() }
     @objc private func toggleAutoTab() { Settings.autoTabRemembered.toggle() }
@@ -305,7 +368,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSApp.activate()
         NSApp.orderFrontStandardAboutPanel(options: [
             .applicationName: "Paneful Desktop Manager",
-            .credits: NSAttributedString(string: "Snap windows side by side, group any apps into tabs that are remembered across restarts, and auto-tile new windows.\nOpen source under the MIT License."),
+            .credits: NSAttributedString(string: "Snap windows side by side, group any apps into tabs that are remembered across restarts, auto-tile new windows, and save layouts you can bring back with a shortcut.\nOpen source under the MIT License."),
         ])
     }
 }

@@ -32,6 +32,8 @@ Paneful is a free, open-source menu-bar app for macOS. It brings things macOS do
   its window.
 - **Auto-tab new windows (optional, off by default).** New windows join the tab group of the window you were
   using.
+- **Saved layouts.** Press ⌃⌥⇧1 to ⌃⌥⇧9 to save where every window is (tab groups included) under that number,
+  and ⌃⌥1 to ⌃⌥9 to bring the arrangement back.
 
 The **[documentation](https://paneful.vercel.app/docs/)** has an animated demo for every feature.
 See [FEATURES.md](FEATURES.md) for the full feature list.
@@ -77,6 +79,7 @@ To see each of these in action, watch the animated demos in the [docs](https://p
 [dropping files onto tabs](https://paneful.vercel.app/docs/#drop-on-tabs),
 [the close button](https://paneful.vercel.app/docs/#close-button), [auto-tab new windows](https://paneful.vercel.app/docs/#auto-tab-new),
 [auto-tiling](https://paneful.vercel.app/docs/#auto-tiling), [arranging tiles](https://paneful.vercel.app/docs/#arrange-tiles),
+[saved layouts](https://paneful.vercel.app/docs/#saved-layouts),
 [shortcuts](https://paneful.vercel.app/docs/#shortcuts) and
 [troubleshooting](https://paneful.vercel.app/docs/#troubleshooting).
 
@@ -126,6 +129,23 @@ Off by default. Turn it on in the menu bar: **Auto-tile New Windows**.
   to an edge or with a shortcut.
 - Each display has its own layout, and each Space shows only its own windows.
 
+### Saved layouts
+| Action | How |
+|---|---|
+| Save the current arrangement | ⌃⌥⇧1 … ⌃⌥⇧9, or menu bar → Saved Layouts → **Save Current Layout As** → number. Saving under a used number replaces it |
+| Bring it back | ⌃⌥1 … ⌃⌥9, or menu bar → Saved Layouts → **Layout** *n* |
+| Delete one | Menu bar → Saved Layouts → **Forget Layout** |
+
+- A layout holds every window on the current desktop (all displays): where each one sits, which is in front, and
+  your tab groups with their tabs and the visible tab.
+- Restoring finds each saved window among the open ones by app and title (for an app with several windows whose
+  titles changed, the one nearest to where it was). It brings back minimized windows and hidden apps, forms the
+  tab groups again (and splits off windows you grouped since), and restores the stacking order.
+- Windows that aren't open are skipped: Paneful doesn't launch apps. Windows that aren't in the layout stay put.
+- If a display is gone or changed size, its windows keep their relative place and size on the closest display.
+- With auto-tiling on, restoring a layout floats the current windows. New windows are still tiled.
+- Layouts are saved in `~/Library/Application Support/Paneful/layouts.json`.
+
 ### Remembered groups
 - Groups are saved in `~/Library/Application Support/Paneful/groups.json`.
 - When a window from a remembered group opens again, it joins its group as a tab within a few seconds of
@@ -136,7 +156,7 @@ Off by default. Turn it on in the menu bar: **Auto-tile New Windows**.
   off with **Auto-tab Remembered Windows**.
 
 Everything is also in the menu-bar icon, where you can switch off drag-to-snap, drag-to-tab and the
-close-button behaviour, turn on auto-tiling, and turn on Launch at Login. If macOS's own edge tiling or Stage Manager is on, the menu warns you, because both fight
+close-button behaviour, turn on auto-tiling, manage saved layouts, and turn on Launch at Login. If macOS's own edge tiling or Stage Manager is on, the menu warns you, because both fight
 Paneful, and links to the setting that turns them off.
 
 ## How it works
@@ -151,6 +171,8 @@ Paneful, and links to the setting that turns them off.
   and keeps a main-and-stack layout per display.
 - **An event tap** sees clicks on a tabbed window's red close button and minimizes the window instead.
 - **The tab bar is a drag destination**, so holding a dragged file over a tab opens it (spring-loading).
+- **Saved layouts** record each window's app, title and frame, front to back. Restoring pairs them with the open
+  windows (same title, then similar title, then nearest) and fits frames to the displays connected now.
 - **Sleep, lock and display changes** pause Paneful's window checks until the screens have settled, so groups
   don't drift.
 - **Carbon `RegisterEventHotKey`** handles the global shortcuts.
@@ -162,6 +184,7 @@ Sources/Paneful/
 ├── Snapping/       snap zones, drag controller, preview panel, window actions
 ├── Tabs/           tab-group manager, floating tab bar, remembered-group store, close-button interceptor
 ├── Tiling/         auto-tiler, layout math, placeholder tiles
+├── Layouts/        saved layouts: capture and restore, window matching, layouts.json store
 ├── Hotkeys/        global shortcuts
 └── Support/        coordinate conversion, settings, sleep/lock state, macOS conflict checks
 Tests/PanefulTests/ unit tests (swift test)

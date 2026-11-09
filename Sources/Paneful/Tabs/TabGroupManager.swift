@@ -365,6 +365,67 @@ final class TabGroupManager {
         GroupStore.shared.saveNow(groups.map(\.stored))
     }
 
+    // MARK: - Saved layouts
+
+    /// Takes a window out of its tab group for good, leaving it where it is (a saved layout places it next).
+    func detach(_ window: AXWindow) {
+        guard let group = boundGroup(of: window) else { return }
+        forget(window, in: group, placeAt: nil)
+    }
+
+    /// Makes `windows` (in tab order) one tab group whose windows fill `contentFrame`, showing `active`.
+    /// The group most of them already belong to is reused, so it keeps its other remembered members; windows
+    /// from other groups move over. Members that the layout puts somewhere else (`claimedElsewhere`) leave it.
+    /// The caller brings back windows that are minimized: they count as tabs here already.
+    func arrange(_ windows: [AXWindow], contentFrame: CGRect, active: AXWindow, claimedElsewhere: Set<AXWindow>) {
+        guard windows.count >= 2 else { return }
+        var tally: [ObjectIdentifier: (group: TabGroup, count: Int)] = [:]
+        for window in windows {
+            guard let group = boundGroup(of: window) else { continue }
+            tally[ObjectIdentifier(group), default: (group, 0)].count += 1
+        }
+        let group: TabGroup
+        if let reused = tally.values.max(by: { $0.count < $1.count })?.group {
+            group = reused
+        } else {
+            group = TabGroup(members: [], contentFrame: contentFrame)
+            groups.append(group)
+        }
+
+        // Join first, then let the others go, so the group never drops below two members on the way.
+        for window in windows where group.memberIndex(of: window) == nil {
+            if let old = boundGroup(of: window) { forget(window, in: old, placeAt: nil) }
+            group.members.append(member(for: window))
+            observe(window)
+        }
+        let wanted = Set(windows)
+        for index in group.members.indices where group.members[index].window.map(wanted.contains) == true {
+            group.members[index].minimized = false
+            group.members[index].hidden = false
+        }
+        for window in group.members.compactMap(\.window) where claimedElsewhere.contains(window) && !wanted.contains(window) {
+            forget(window, in: group, placeAt: nil)
+        }
+
+        // Their tabs come first, in the saved order; the group's other members keep their order after them.
+        let tabs = windows.compactMap { window in group.memberIndex(of: window).map { group.members[$0] } }
+        group.members = tabs + group.members.filter { member in member.window.map { !wanted.contains($0) } ?? true }
+        group.collapsed = false
+        group.activeWindow = active
+        if group.isFormed {
+            group.contentFrame = fitted(contentFrame)
+            group.windows.forEach { FrameKeeper.shared.place($0, group.contentFrame) }
+            updateBar(group)
+            placeBars()
+        } else {
+            // Already at the group's frame, so forming doesn't take the bar's height off the windows again.
+            group.contentFrame = contentFrame
+            form(group, around: contentFrame, active: active)
+        }
+        save()
+        Log.tabs.notice("Arranged \(group.displayName, privacy: .public) from a saved layout")
+    }
+
     // MARK: - Membership changes
 
     private func member(for window: AXWindow) -> TabGroup.Member {

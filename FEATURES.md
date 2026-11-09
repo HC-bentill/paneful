@@ -159,6 +159,25 @@ Requested by Henry: like auto-tiling, but new windows become tabs.
 - How it works: the same new-window detection as auto-tiling (`AutoTiler.adoptNewWindows`), then
   `TabGroupManager.addToGroup(target: <most recent visible window>, window: <new window>)`.
 
+## 8. Saved layouts ✅ (v0.3.0, awaiting manual test)
+Requested by Henry (was a backlog idea): store the current arrangement under a number and bring it back with a
+shortcut.
+- **⌃⌥⇧1…9** saves, **⌃⌥1…9** restores. Menu bar → **Saved Layouts ▸** (after Side by Side) lists the layouts
+  ("Layout 1: Safari, Xcode, Terminal +2 ⌃⌥1"), plus **Save Current Layout As ▸ 1…9** and **Forget Layout ▸**.
+- Saved: every standard window on the current desktop, all displays, front to back. Per window: bundle ID, app
+  name, title, frame (AX), and the visible frame of its display. A formed tab group is one item: its live tabs in
+  order, its content frame and its visible tab. Stored in `~/Library/Application Support/Paneful/layouts.json`.
+- Restore: open windows of the layout's apps are paired with the saved ones (`LayoutMatcher`: same app, then same
+  title, similar title, else nearest frame; each window used once). Hidden apps are unhidden, minimized windows
+  come back, windows saved alone leave their current tab group, saved groups are formed again with
+  `TabGroupManager.arrange` (reuses the group most of them belong to, so remembered closed members survive), and
+  frames are fitted with `LayoutGeometry` (same display: exact; display gone or resized: same relative place on
+  the most overlapping display, kept on screen). Then windows are raised back to front and the front one focused.
+- Windows not open are skipped (no app launching); windows not in the layout are left alone. With auto-tiling on,
+  restoring calls Float All Windows first.
+- A pop-up confirms: "Layout 1 saved · 5 windows · ⌃⌥1 brings them back", "Layout 1 restored · 4 of 5 windows ·
+  not open: Mail", "No layout saved as 3".
+
 ## Install and updates
 - Updating no longer needs removing Paneful from the Accessibility list and relaunching (fixed 2026-11-09).
   macOS ties the grant to the code signature, and ad-hoc builds get a new one every release, so the old entry
@@ -179,7 +198,6 @@ Requested by Henry: like auto-tiling, but new windows become tabs.
 - URL-scheme commands (`paneful://snap?zone=leftHalf`, `paneful://tab-with-previous`, …) for Shortcuts,
   Raycast or Alfred.
 - Drag the tab bar itself to move the whole group (and drag it to an edge to snap the group).
-- Saved layouts: store the current arrangement under a number and bring it back with a shortcut.
 
 Refinements marked in features 1–4 come from a review of a comparable window manager's docs (Trellis WM,
 2026-11-06).

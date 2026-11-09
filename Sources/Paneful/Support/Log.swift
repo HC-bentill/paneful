@@ -10,4 +10,5 @@ enum Log {
     static let frames = Logger(subsystem: subsystem, category: "frames")
     static let tabs = Logger(subsystem: subsystem, category: "tabs")
     static let tiling = Logger(subsystem: subsystem, category: "tiling")
+    static let layouts = Logger(subsystem: subsystem, category: "layouts")
 }
