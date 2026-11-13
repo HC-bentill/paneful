@@ -79,6 +79,8 @@ To see each of these in action, watch the animated demos in the [docs](https://p
 [dropping files onto tabs](https://paneful.vercel.app/docs/#drop-on-tabs),
 [the close button](https://paneful.vercel.app/docs/#close-button), [auto-tab new windows](https://paneful.vercel.app/docs/#auto-tab-new),
 [auto-tiling](https://paneful.vercel.app/docs/#auto-tiling), [arranging tiles](https://paneful.vercel.app/docs/#arrange-tiles),
+[full-screen tab groups](https://paneful.vercel.app/docs/#full-screen),
+[moving a group to another desktop](https://paneful.vercel.app/docs/#desktops),
 [saved layouts](https://paneful.vercel.app/docs/#saved-layouts),
 [shortcuts](https://paneful.vercel.app/docs/#shortcuts) and
 [troubleshooting](https://paneful.vercel.app/docs/#troubleshooting).
@@ -102,12 +104,33 @@ To see each of these in action, watch the animated demos in the [docs](https://p
 | Remove a tab | Drag the tab down out of the bar until it says **Release to pull out of the group**, right-click → Move Out of Group, or ⌃⌥W |
 | Tab's ✕ | Hover a tab and click ✕: its window goes to the Dock and the next tab takes its place. Click it in the Dock to bring it back as the active tab (right-click → Minimize Window does the same) |
 | Red close button | Sends a tabbed window to the Dock instead of closing it, and the next tab takes its place. Click it in the Dock to bring it back as the active tab. ⌥-click the button to really close the window. Switch this off with **Close Button Minimizes Tabs** in the menu. Apps that only hide their window when closed (Postman, Teams, Slack) step aside the same way |
+| Green button (fill the screen) | The whole group fills the screen: tab bar along the top, windows below. Click it again to put the group back where it was. Paneful remembers this across restarts. ⌥-click it for macOS's own full screen for that window alone. Switch this off with **Green Button Fills Screen** in the menu |
+| A tab goes full screen | If a tabbed window goes into macOS's own full screen (⌥-click on the green button, ⌃⌘F, or the app's View menu), its tab steps aside and the other tabs keep their size. When it leaves full screen, it comes back as the active tab |
 | Tab every new window automatically | Menu bar → **Auto-tab New Windows** (off by default). A new window joins the tab group of the window you were using, or starts one with it |
 | Close a tab's window | ⌥-click its red button, or right-click its tab → Close Window (the group still remembers it) |
 | Drop a file into a tab | Drag a file, folder, text or image onto a tab and hold it there (**Hold to open this tab**). The tab opens (**Now drop it onto the window**); drop it into the window below |
 | Ungroup | Right-click a tab → Ungroup All, or the menu-bar menu |
 | Minimize a tab | Its ✕, its red button, or ⌘M. It steps out of the bar while minimized and comes back as the active tab when restored |
 | Minimize the whole group | ⌃⌥M, menu bar → Minimize Group, or right-click a tab → Minimize Group. Restoring any of its windows from the Dock brings the whole group back |
+
+**Moving a group to another desktop.** A tab group lives on one desktop (Space). In Mission Control, drag the
+group's tab bar onto another desktop, and the rest of the group follows it there. macOS has no way for an app to
+move another app's window between desktops, so Paneful does what you would: while Mission Control is still open,
+it drags each of the group's windows onto the same desktop. That works for every app and needs no keyboard
+shortcuts. You'll see the pointer do it, about a second per window. Moving the mouse meanwhile is fine; a click
+or a key press stops it. Dragging just one of the group's windows to another desktop works too: the rest
+of the group follows it. A window that can't be moved (say, it's in full screen) keeps a dimmed "away" tab; click
+it and Paneful fetches the window through Mission Control. Switch all this off with **Move Whole Group Between
+Desktops** in the menu (a moved window's tab is then dimmed until it's back with the group). Groups remember their desktop.
+
+**Full-screen tab groups, one per desktop.** macOS's own full screen holds just one window in a Space of its
+own, so a group of several apps' windows can't go there. You can get the same feel with desktops: in Mission
+Control, click **+** to add a desktop for each group. Switch to it, open and group the windows there, then click
+the green button. Swipe left or right with three fingers to move between groups, just like full-screen apps.
+Each group's tab bar stays on its own desktop and slides in with it. For the best results, go to System Settings
+→ Desktop & Dock and turn off **Automatically rearrange Spaces based on most recent use** and **When switching to
+an application, switch to a Space with open windows for the application**. Set the menu bar to hide
+automatically (**Always**) and the Dock to hide automatically, so the group gets the whole screen.
 
 ### Auto-tiling
 Off by default. Turn it on in the menu bar: **Auto-tile New Windows**.
@@ -169,7 +192,12 @@ Paneful, and links to the setting that turns them off.
   one opens a new window that matches, it tabs that window back in.
 - **Auto-tiling** compares the window server's window list with every window seen before to spot new windows,
   and keeps a main-and-stack layout per display.
-- **An event tap** sees clicks on a tabbed window's red close button and minimizes the window instead.
+- **An event tap** sees clicks on a tabbed window's red and green buttons: red minimizes the window instead,
+  green makes the whole group fill the screen.
+- **Desktops (Spaces)** are read with private, read-only window-server calls (as AltTab and Hammerspoon do). To
+  carry a group to another desktop, Paneful drags each window onto it in Mission Control, reading where
+  everything is through Accessibility; the private "move window to space" calls only work on Paneful's own
+  windows.
 - **The tab bar is a drag destination**, so holding a dragged file over a tab opens it (spring-loading).
 - **Saved layouts** record each window's app, title and frame, front to back. Restoring pairs them with the open
   windows (same title, then similar title, then nearest) and fits frames to the displays connected now.
@@ -192,7 +220,10 @@ Tests/PanefulTests/ unit tests (swift test)
 
 ## Known limitations
 - Some apps enforce minimum sizes or animate their own resizes, so they may not fill a tile exactly.
-- Full-screen (green button) windows can't be tiled or grouped.
+- Windows in macOS's own full screen can't be tiled, snapped or added to a group (the snap shortcuts beep).
+  A tab group fills the screen with the green button instead, on its normal desktop.
+- Paneful can't create desktops. It moves a group between desktops by switching desktops while holding each
+  window, so you see the desktops slide, and it only works between desktops of the same display.
 - Shortcuts that clash with other window managers (e.g. Rectangle's ⌃⌥ arrows) fail to register. Quit the
   other app or change one of them.
 - Not on the Mac App Store: window managers can't run inside the App Store sandbox.

@@ -25,6 +25,8 @@ enum WindowActions {
     static func snap(_ zone: SnapZone) {
         guard let window = currentWindow, let frame = window.frame,
               let screen = Geometry.screen(forAX: frame) else { return }
+        // macOS doesn't let anyone move a window that's in its own full screen: say so instead of doing nothing.
+        guard !window.isFullScreen else { NSSound.beep(); return }
         AutoTiler.shared.release(window)   // snapped somewhere on purpose: it floats now
         WindowMover.move(window, toCocoa: zone.rect(in: screen.visibleFrame))
     }
@@ -34,7 +36,8 @@ enum WindowActions {
         guard let window = currentWindow,
               let other = FocusTracker.shared.previous(excluding: window),
               let frame = window.frame,
-              let screen = Geometry.screen(forAX: frame) else { NSSound.beep(); return }
+              let screen = Geometry.screen(forAX: frame),
+              !window.isFullScreen, !other.isFullScreen else { NSSound.beep(); return }
         let visible = screen.visibleFrame
         AutoTiler.shared.release(window)
         AutoTiler.shared.release(other)

@@ -1,11 +1,21 @@
 import AppKit
 import SwiftUI
 
+/// Why a tab's window isn't here.
+enum TabAway: Equatable {
+    /// On another desktop (it was moved there, or stayed behind when the group moved). Click: bring it here.
+    case otherDesktop
+    /// In macOS's own full screen (a Space of its own). Click: go to it.
+    case fullScreen
+}
+
 struct TabItem: Identifiable, Equatable {
-    let id: Int          // index among the group's live windows
+    let id: Int          // position in the bar (away tabs count)
     let title: String
     let icon: NSImage?
     let isActive: Bool
+    /// Set for an away tab: drawn dimmed, with a badge.
+    var away: TabAway? = nil
 }
 
 @MainActor
@@ -82,13 +92,21 @@ final class TabBarPanel {
         }
     }
 
+    /// Up on some desktop (Space), possibly not the one on screen.
     var isVisible: Bool { panel.isVisible }
+
+    /// Up on the desktop that's on screen now. A bar stays on its group's desktop when the user switches to
+    /// another one, so use this (not `isVisible`) for anything about what's under the mouse.
+    var isShowingHere: Bool { panel.isVisible && panel.isOnActiveSpace }
 
     /// The bar's window-server number, to find it in CGWindowList.
     var windowNumber: Int { panel.windowNumber }
 
     /// Orders the bar directly above another app's window (its group's visible tab).
     func show(above windowID: CGWindowID) {
+        // Still up on another desktop (its group's window was moved here): take it down first, so it's
+        // shown again on this one.
+        if panel.isVisible && !panel.isOnActiveSpace { panel.orderOut(nil) }
         panel.order(.above, relativeTo: Int(windowID))
     }
 
@@ -130,7 +148,8 @@ final class TabBarPanel {
     /// A file, folder, text or image is being dragged over the strip (`point` in the strip view), or has
     /// left it (`nil`).
     private func dragHovered(at point: CGPoint?) -> NSDragOperation {
-        guard let point, panel.isVisible, let index = tabIndex(at: point) else {
+        // Not over an away tab: opening it would carry its window over from another desktop.
+        guard let point, panel.isVisible, let index = tabIndex(at: point), model.tabs[index].away == nil else {
             endSpringLoad()
             return []
         }
@@ -154,7 +173,7 @@ final class TabBarPanel {
     /// Dropped onto a tab itself: open it (if the hold hadn't already), and let the drop bounce back so
     /// nothing is lost. The window below is where the drop belongs.
     private func dropped(at point: CGPoint) {
-        if let index = tabIndex(at: point), !model.tabs[index].isActive {
+        if let index = tabIndex(at: point), !model.tabs[index].isActive, model.tabs[index].away == nil {
             actions.select(index)
         }
         endSpringLoad()
@@ -427,12 +446,21 @@ private struct TabButton: View {
                 Image(nsImage: icon)
                     .resizable()
                     .frame(width: 16, height: 16)
+                    .opacity(tab.away == nil ? 1 : 0.5)
             }
             Text(tab.title)
                 .font(.system(size: 12, weight: tab.isActive ? .semibold : .regular))
+                .italic(tab.away != nil)
+                .foregroundStyle(tab.away == nil ? Color.primary : Color.secondary)
                 .lineLimit(1)
                 .truncationMode(.tail)
             Spacer(minLength: 0)
+            if let away = tab.away, !(hovering && !anyDrag) {
+                // Away: on another desktop, or in full screen.
+                Image(systemName: away == .fullScreen ? "arrow.up.left.and.arrow.down.right" : "rectangle.on.rectangle")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
             if hovering && !anyDrag {
                 // Like the window's red button: the window goes to the Dock and keeps its place in the group.
                 Button { actions.minimize(tab.id) } label: {
@@ -483,6 +511,17 @@ private struct TabButton: View {
             Button("Minimize Group  ⌃⌥M") { actions.minimizeGroup() }
             Button("Ungroup All") { actions.ungroup() }
         }
-        .help("\(tab.title)\nDrag sideways to reorder. Drag down to pull it out of the group. Hold a dragged file here to open this tab.")
+        .help(helpText)
+    }
+
+    private var helpText: String {
+        switch tab.away {
+        case .otherDesktop?:
+            "\(tab.title)\nOn another desktop. Click to bring it here."
+        case .fullScreen?:
+            "\(tab.title)\nIn full screen. Click to go to it."
+        case nil:
+            "\(tab.title)\nDrag sideways to reorder. Drag down to pull it out of the group. Hold a dragged file here to open this tab."
+        }
     }
 }

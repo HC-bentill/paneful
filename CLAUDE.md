@@ -5,7 +5,13 @@ Repo: https://github.com/HC-bentill/paneful (public). Bundle ID: io.github.hc-be
 CI: .github/workflows/build.yml runs `swift test` and builds the app bundle on every push and PR.
 agentmemory project id: `macos-window-tabs-tiler`. Recall it for the full history (video analyses, decisions).
 
-## Status (2026-11-09, release 0.3.0 prepared)
+## Status (2026-11-13, release 0.4.0)
+- 0.4.0 = features 9 (full-screen tab groups) and 10 (move a group between desktops, via drags in Mission Control),
+  plus the "group breaks on another desktop" fix. Info.plist 0.4.0. Henry asked Claude to make this release
+  (commit, tag v0.4.0, push) and to update the landing docs (sections #full-screen and #desktops with demos;
+  Stage got `mc`, `spaces` and `tabs.away`). Feature 10 hand-tested OK on 2026-11-13; feature 9 not yet.
+
+## Status (2026-11-09, release 0.3.0 PUBLISHED)
 - Resources/Info.plist is 0.3.0. Local `make-dmg.sh` build verified (ad-hoc, arm64, build 15). Everything is
   UNCOMMITTED in both repos: Henry commits, tags v0.3.0 and pushes himself. He chose self-signed release signing:
   build/signing/Paneful-Self-Signed.p12 + .password were created 2026-11-09 (SHA-1 3B:EF:31:E2:…:80:BD, git-ignored).
@@ -16,10 +22,23 @@ agentmemory project id: `macos-window-tabs-tiler`. Recall it for the full histor
   32pt after every sleep (SystemState pause + AXWindow.isGone + form() no double bar), red close button on a
   tabbed window minimizes instead (CloseButtonInterceptor), drag files onto tabs (spring-loaded TabStripHostingView),
   auto-tiling (Tiling/, feature 3, default OFF). Landing docs updated (not pushed). Henry pushes himself.
-- Release CI fixed and verified: dry run 42676902485 (workflow_dispatch) signed with the self-signed cert,
-  designated requirement `certificate leaf = H"3bef31e2…"`. The v0.3.0 tag on origin still points at a681552
-  (failed run, no release published), so it must be moved to the final commit before releasing.
+- 0.3.0 released 2026-11-09 19:55Z: tag v0.3.0 → 1e5d991, release run 42686833405. releases/latest/download/
+  Paneful.dmg serves 0.3.0, signed `certificate leaf = H"3bef31e2…"` (self-signed; the grant now survives updates
+  from 0.3.0 on). Landing docs pushed (f2a9db9) and live on Vercel. The items below are released but still NOT
+  hand-tested.
 - Saved layouts (feature 8) added 2026-11-09 for 0.3.0: builds with 0 new warnings, 29 tests pass, NOT hand-tested.
+- Full-screen tab groups (feature 9) built 2026-11-12, UNCOMMITTED: debug + release build with 0 warnings, 31 tests
+  pass, dev bundle built. NOT hand-tested (Henry runs 0.3.0 from /Applications). See FEATURES.md §9.
+  Same day: fixed "group breaks when a window is moved to another desktop" (a friend with 4 desktops): Spaces.swift
+  + checkDesktops + Member.elsewhere. 35 tests pass. NOT hand-tested.
+- Feature 10 (2026-11-12, UNCOMMITTED): drag the tab bar to another desktop → the whole group follows (Henry's
+  "option A" after his 10 pm recording, which ran the Feature 9 DEV build, pid 47294, not 0.3.0). Debug + release
+  0 warnings, 51 tests pass, dev bundle rebuilt. NOT hand-tested. See FEATURES.md §10.
+  2026-11-13: the mover now drags windows in Mission Control (the Claude app couldn't be grabbed by its title
+  bar). Hand-tested 20:18–20:22: works (4 windows, Claude included, first try each, ~2 s per window).
+  Then: mouse moves no longer stop a move, brisker first try. Debug + release 0 warnings, 55 tests pass. Dev
+  bundle NOT rebuilt (Henry's Paneful runs from it): he quits Paneful, then ./scripts/bundle.sh debug && open
+  build/Paneful.app.
 
 ## Earlier status (2026-11-06)
 - Features 1, 2 and 4 are built, including refinements adopted from the Trellis WM docs (see FEATURES.md).
@@ -131,6 +150,44 @@ Privacy & Security → Accessibility after every rebuild.
   check is pure geometry. DON'T use AXUIElementCopyElementAtPosition here: Electron apps (VS Code, Postman)
   return web content under the traffic lights, so the click went through. Hit → swallow down+up,
   setMinimized(true). ⌥-click passes through. Setting closeButtonMinimizesTabs (default on).
+  It also handles the GREEN button (kAXFullScreenButtonAttribute, else kAXZoomButtonAttribute; setting
+  greenButtonFillsGroups, default on): click → TabGroupManager.toggleFill (the group fills the screen's visibleFrame;
+  TabGroup.restoreFrame = the frame to go back to, persisted in StoredGroup, nil = not filled; checkStillFilled in
+  keepInPlace drops it when the group is moved; setOuterFrame/arrange clear it; restoreGroupFrames re-fills).
+  ⌥-click → AXWindow.setFullScreen(true) (native full screen). Targets only for bars with isShowingHere.
+  Member.fullScreen: a member in native full screen steps aside like a minimized tab (windowEnteredFullScreen,
+  detected in the AX moved/resized handler and on the tick for the active window; reconcile(focusNext: false)
+  so the user isn't pulled out of the full-screen Space). checkFullScreenEnded rejoins it 0.8s after it leaves.
+  Tab bars on other desktops: placeBars leaves a bar up when it isn't on the active Space (it slides in with the
+  desktop). Use TabBarPanel.isShowingHere (isVisible && isOnActiveSpace), not isVisible, for hit-testing.
+  Desktops: `Accessibility/Spaces.swift` = read-only private CGSCopySpacesForWindows (mask 7) +
+  CGSCopyManagedDisplaySpaces ("Current Space" per display). Verified on macOS 27.2: windows on a desktop
+  report its ID; minimized/hidden windows report nothing or the desktop they were last on. A group lives on
+  `Spaces.home` (most windows; tie → visible tab's desktop). checkDesktops() (tick, mouse up ≥0.5s via
+  CGEventSource.secondsSinceLastEventType, skipped while any member isPlacing) sets Member.elsewhere for members on
+  other desktops: out of the bar, reconcile(focusNext: false), never focused; back via layoutAfterJoin(focus:
+  false). checkHiddenWindows ignores windows on desktops that aren't showing. NEVER focus a window on another
+  desktop: macOS jumps there (that was the "group breaks on another desktop" bug).
+  Elsewhere and full-screen members keep an "away" tab (TabAway, Member.away / isShownInBar, TabGroup.barMembers;
+  bar indices map through barMembers). A formed group keeps its bar while `keepsBar` (1+ window here, 2+ tabs).
+  Feature 10: checkBarDesktops (tick, before placeBars) → DesktopMovePlan.barCheck (bar's desktop vs lastBarSpace
+  vs homeDesktop) → pendingDesktopMoves → servePendingDesktopMove (nothing held, clicks/keys idle 0.3s, no desktop
+  slide; Mission Control may be open; 20s timeout) → DesktopMovePlan.decide → carry → DesktopMover
+  (Tabs/DesktopMover.swift: drags each window's PICTURE onto the target desktop in Mission Control, opening it if
+  needed; Accessibility/MissionControl.swift reads WindowManager's AX tree: mc.display, mc.spaces.list buttons
+  "Desktop N"; a window's picture = its CGWindowList bounds while MC is open; let go just inside the TOP of the
+  target button's frame (its middle makes a full-screen space); events tagged eventTag; a listen-only tap stops
+  on a real click or key press, NOT on mouse moves: Henry's choice, and MC sends pid-0 moves of its own) → finishCarry (settle → away tabs, pinnedHome, bar via Spaces.moveOwnWindow, toast).
+  Title-bar grab-and-switch was dropped 2026-11-13 (failed on apps with custom title bars, like Claude).
+  Minimize → un-minimize elsewhere does NOT move a window on 27.2 (it returns to its desktop).
+  returnBar = CGSMoveWindowsToManagedSpace on the bar (works for OWN windows only; for other apps' windows it's a
+  silent no-op on 27.2, as are Add/RemoveWindowsToSpaces; SLSSetWindowListWorkspace = kCGErrorNotImplemented).
+  While DesktopMover.isBusy: refresh, placeBars, AX handler, DragController and AutoTiler.update do nothing.
+  StoredGroup.desktop (uuid + number); re-forming at restore/claim → scheduleDesktopRestore.
+  A live window moved off the group's desktop (DesktopMovePlan.movedAway on lastSpaceOf/lastHome in
+  checkDesktops) → pending .windowMoved → the rest follows. Not instant by design: no private call moves another
+  app's window on 27.2 (SLSSpaceAddWindowsAndRemoveFromSpaces / SLSMoveWindowsToManagedSpace / SLSProcessAssignToSpace
+  all tested: no effect).
   Member.hidden: apps that hide-on-close (Postman, Teams, Slack) leave the window alive but off screen.
   checkHiddenWindows() marks a member hidden when its window is off screen ≥0.6s while a groupmate is showing
   (not ⌘H-hidden, not minimized, not during a Space switch) → like a minimized tab; unhidden when it shows again.
@@ -196,6 +253,10 @@ Privacy & Security → Accessibility after every rebuild.
 6. Close button minimizes tabs: built 2026-11-09.
 7. Auto-tab new windows: built 2026-11-09 (default off).
 8. Saved layouts (⌃⌥⇧1…9 save, ⌃⌥1…9 restore): built 2026-11-09.
+9. Full-screen tab groups (green button fills the screen; one group per desktop + three-finger swipe; a tab in
+   native full screen steps aside; snap shortcuts beep on full-screen windows): built 2026-11-12.
+10. Drag the tab bar to another desktop moves the group (drags in Mission Control, away tabs, desktop remembered): built
+   2026-11-12.
 Henry is recording more videos and will add features. Append each one to FEATURES.md and agentmemory.
 
 ## Conventions

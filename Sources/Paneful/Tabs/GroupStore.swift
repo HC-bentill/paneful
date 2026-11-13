@@ -29,6 +29,18 @@ struct StoredGroup: Codable {
     var members: [WindowSignature]
     /// Last frame (AX coordinates) shared by the group's windows.
     var contentFrame: CGRect
+    /// Present while the group fills its screen (green button): the frame it goes back to. Older files don't
+    /// have it.
+    var restoreFrame: CGRect? = nil
+    /// The desktop the group was last on, so it comes back there. Older files don't have it.
+    var desktop: StoredDesktop? = nil
+}
+
+/// A desktop (Space) as saved on disk. macOS's numeric Space IDs change when displays come and go, so the
+/// desktop's UUID is kept, with its number ("Desktop 2") for the menu and as a fallback.
+struct StoredDesktop: Codable, Equatable {
+    var uuid: String
+    var number: Int
 }
 
 /// Saves remembered tab groups as JSON in ~/Library/Application Support/Paneful/groups.json.
@@ -44,10 +56,11 @@ final class GroupStore {
     let url: URL
     private var pendingSave: DispatchWorkItem?
 
-    init() {
+    /// `url` is for tests; Paneful uses the default place.
+    init(url: URL? = nil) {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support")
-        url = base.appendingPathComponent("Paneful", isDirectory: true).appendingPathComponent("groups.json")
+        self.url = url ?? base.appendingPathComponent("Paneful", isDirectory: true).appendingPathComponent("groups.json")
     }
 
     func load() -> [StoredGroup] {

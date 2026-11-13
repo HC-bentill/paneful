@@ -63,6 +63,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        // The groups are loaded when the engine starts. Quitting before that (still waiting for Accessibility,
+        // or "Quit This One") would save an empty list over the remembered groups.
+        guard engineStarted else { return }
         // Leave every window visible at its group's full frame, but keep the groups remembered.
         TabGroupManager.shared.suspendAll()
     }
@@ -80,7 +83,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             MainActor.assumeIsolated {
                 FocusTracker.shared.update()
                 TabGroupManager.shared.refresh()
-                AutoTiler.shared.update()
+                // Not while a tab group is carried to another desktop: windows change desktops on purpose.
+                if !DesktopMover.shared.isBusy { AutoTiler.shared.update() }
             }
         }
     }
@@ -171,6 +175,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                     #selector(toggleCloseMinimizes))
         closeMinimizes.toolTip = "In a tab group, the red close button sends the window to the Dock instead of closing it. ⌥-click it to close."
         menu.addItem(closeMinimizes)
+        let greenFills = toggle("Green Button Fills Screen", Settings.greenButtonFillsGroups,
+                                #selector(toggleGreenFills))
+        greenFills.toolTip = "In a tab group, the green button makes the whole group fill the screen, and clicking it again restores its size. ⌥-click it for macOS full screen for that window alone."
+        menu.addItem(greenFills)
+        let barMoves = toggle("Move Whole Group Between Desktops", Settings.dragBarMovesGroup,
+                              #selector(toggleBarMovesGroup))
+        barMoves.toolTip = "In Mission Control, drag a group's tab bar, or one of its windows, onto another desktop and Paneful drags the rest of the group there too (macOS has no faster way). Off: the bar goes back to its windows, and a moved window's tab is dimmed."
+        menu.addItem(barMoves)
         menu.addItem(toggle("Launch at Login", Settings.launchAtLogin, #selector(toggleLaunchAtLogin)))
         menu.addItem(.separator())
         menu.addItem(item("About Paneful", #selector(about)))
@@ -273,9 +285,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let open = group.windows.count
             let entry = NSMenuItem(title: group.displayName, action: nil, keyEquivalent: "")
             let detail = NSMenu()
+            if let desktop = TabGroupManager.shared.desktopName(of: group) {
+                let line = NSMenuItem(title: "On \(desktop)", action: nil, keyEquivalent: "")
+                line.isEnabled = false
+                detail.addItem(line)
+            }
             for member in group.members {
                 let state = member.window == nil ? "closed"
-                    : member.minimized ? "minimized" : member.hidden ? "hidden" : "open"
+                    : member.minimized ? "minimized" : member.hidden ? "hidden"
+                    : member.fullScreen ? "full screen" : member.elsewhere ? "on another desktop" : "open"
                 let hint = member.signature.titleHint.map { " — \($0)" } ?? ""
                 let line = NSMenuItem(title: "\(member.signature.appName)\(hint) (\(state))", action: nil, keyEquivalent: "")
                 line.isEnabled = false
@@ -354,6 +372,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func toggleAutoTab() { Settings.autoTabRemembered.toggle() }
     @objc private func toggleLaunchAtLogin() { Settings.launchAtLogin.toggle() }
     @objc private func toggleCloseMinimizes() { Settings.closeButtonMinimizesTabs.toggle() }
+    @objc private func toggleGreenFills() { Settings.greenButtonFillsGroups.toggle() }
+    @objc private func toggleBarMovesGroup() { Settings.dragBarMovesGroup.toggle() }
     @objc private func toggleAutoTiling() { AutoTiler.shared.setEnabled(!Settings.autoTiling) }
     @objc private func toggleAutoTabNew() { AutoTiler.shared.setAutoTab(!Settings.autoTabNewWindows) }
     @objc private func toggleTiling() { WindowActions.toggleTiling() }

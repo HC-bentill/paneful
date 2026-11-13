@@ -28,6 +28,20 @@ enum Settings {
         set { defaults.set(newValue, forKey: "closeButtonMinimizesTabs") }
     }
 
+    /// In a tab group, the green button makes the whole group fill the screen (and clicking it again puts it
+    /// back). ⌥-click gives just that window macOS's own full screen.
+    static var greenButtonFillsGroups: Bool {
+        get { defaults.object(forKey: "greenButtonFillsGroups") as? Bool ?? true }
+        set { defaults.set(newValue, forKey: "greenButtonFillsGroups") }
+    }
+
+    /// Dragging a tab bar onto another desktop in Mission Control carries the whole group there. Off: the bar
+    /// goes back to its windows.
+    static var dragBarMovesGroup: Bool {
+        get { defaults.object(forKey: "dragBarMovesGroup") as? Bool ?? true }
+        set { defaults.set(newValue, forKey: "dragBarMovesGroup") }
+    }
+
     /// New windows take a tile: the screen splits into a main column and a stack. Off by default.
     static var autoTiling: Bool {
         get { defaults.object(forKey: "autoTiling") as? Bool ?? false }

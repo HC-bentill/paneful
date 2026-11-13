@@ -53,7 +53,7 @@ struct AXWindow: Hashable {
     }
 
     /// Native full-screen (green button) windows live in their own Space; Paneful leaves them alone.
-    var isFullScreen: Bool { (Self.value(of: element, "AXFullScreen") as? Bool) ?? false }
+    var isFullScreen: Bool { (Self.value(of: element, Self.fullScreenAttribute) as? Bool) ?? false }
 
     var bundleID: String? { NSRunningApplication(processIdentifier: pid)?.bundleIdentifier }
 
@@ -153,6 +153,24 @@ struct AXWindow: Hashable {
     func raise() {
         AXUIElementPerformAction(element, kAXRaiseAction as CFString)
     }
+
+    /// Makes the window its app's main window and the app the active one, through Accessibility. (macOS can
+    /// refuse `NSRunningApplication.activate()` from a background app such as Paneful; this isn't refused.)
+    func activateApp() {
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, 0.5)
+        AXUIElementSetAttributeValue(app, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
+        AXUIElementSetAttributeValue(element, kAXMainAttribute as CFString, kCFBooleanTrue)
+        raise()
+    }
+
+    /// Puts the window into macOS's own full screen (its own Space), or takes it out.
+    func setFullScreen(_ fullScreen: Bool) {
+        AXUIElementSetAttributeValue(element, Self.fullScreenAttribute as CFString,
+                                     fullScreen ? kCFBooleanTrue : kCFBooleanFalse)
+    }
+
+    private static let fullScreenAttribute = "AXFullScreen"
 
     /// Minimizes the window into the Dock, or restores it.
     func setMinimized(_ minimized: Bool) {

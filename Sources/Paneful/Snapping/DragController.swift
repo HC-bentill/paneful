@@ -79,6 +79,8 @@ final class DragController {
 
     private func mouseDown() {
         reset()
+        // Paneful itself is holding a window to carry it to another desktop: not a user drag.
+        guard !DesktopMover.shared.isBusy else { return }
         guard Settings.dragToSnap || Settings.dragToTab else { return }
         let mouse = NSEvent.mouseLocation
         guard let window = WindowQuery.topWindow(atAX: Geometry.axPoint(fromCocoa: mouse)) else { return }
@@ -138,6 +140,7 @@ final class DragController {
 
     private func mouseUp() {
         defer { reset() }
+        guard !DesktopMover.shared.isBusy else { return }
         AutoTiler.shared.noteMouseUp()   // a tile that changes size now was resized by the user
         preview.hide()
         guard isMoving, let window = dragged else { return }
