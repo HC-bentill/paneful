@@ -18,6 +18,10 @@
   <img src="https://img.shields.io/badge/macOS-27.2%2B-black" alt="macOS 27.2+">
 </p>
 
+<p align="center">
+  <img src="Resources/Demo/tab-group.gif" width="760" alt="Demo: a window dragged onto another window's title bar becomes a tab in one frame with it, and a third app's window joins the tab bar">
+</p>
+
 Paneful is a free, open-source menu-bar app for macOS. It brings things macOS doesn't have:
 
 - **Window snapping.** Drag a window to a screen edge (or press a shortcut) and it snaps to half, a quarter
@@ -37,6 +41,13 @@ Paneful is a free, open-source menu-bar app for macOS. It brings things macOS do
 
 The **[documentation](https://paneful.vercel.app/docs/)** has an animated demo for every feature.
 See [FEATURES.md](FEATURES.md) for the full feature list.
+
+**Good to know**
+- Paneful needs macOS 27.2 or later.
+- It asks for Accessibility access, which it needs to move, resize and raise other apps' windows. It makes no
+  network connections and collects no data. All of its code is in this repository.
+- It isn't notarized by Apple yet. The first time you open it, go to System Settings → Privacy & Security and
+  click **Open Anyway**.
 
 ## Download
 Get **[Paneful.dmg](https://github.com/HC-bentill/paneful/releases/latest/download/Paneful.dmg)** (latest release),
